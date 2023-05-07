@@ -2,11 +2,15 @@ using JuMP
 
 # Solving unit commitment and economic dispatch model by iterativly updating parameters
 function solving(Nday, D, ucmodel::JuMP.Model; Horizon::Int = 24)
+    set_optimizer_attribute(ucmodel, "MIPGap", 0.0005)
     for d in 1:Nday
         # Update parameters
         DInput = convert(Matrix{Float64}, D[Horizon*(d-1)+1:Horizon*d, :]')
+        nbus = size(DInput, 1)
         for t in 1:Horizon
-            set_normalized_rhs(ucmodel[:LoadBalance][t], sum(DInput[:, t]))
+            for z in 1:nbus
+                set_normalized_rhs(ucmodel[:LoadBalance][z,t], DInput[z, t])
+            end
         end
         # Solve unit commitment model
         optimize!(ucmodel)

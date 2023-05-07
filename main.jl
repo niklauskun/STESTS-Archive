@@ -1,7 +1,7 @@
 using STESTS, JuMP, Gurobi
 
 # Read data from .jld2 file
-D,
+L,
 genmap,
 GPmax,
 GPmin,
@@ -15,20 +15,20 @@ GRD,
 GSUC,
 GUT,
 GDT,
-GPIni,
+GPini,
 hydromap,
 HAvail,
 renewablemap,
 RAvail = STESTS.read_jld2("./data/WECC240.jld2")
 
 UCHorizon = Int(24) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-NDay = Int(size(D, 1) / UCHorizon)
+NDay = Int(size(L, 1) / UCHorizon)
 #select first HCHorizon rows of D as initial input to unit commitment model
-DInput = convert(Matrix{Float64}, D[1:UCHorizon, :]')
+LInput = convert(Matrix{Float64}, L[1:UCHorizon, :]')
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
-    DInput,
+    LInput,
     genmap,
     GPmax,
     GPmin,
@@ -42,7 +42,7 @@ ucmodel = STESTS.unitcommitment(
     GSUC,
     GUT,
     GDT,
-    GPIni,
+    GPini,
     hydromap,
     HAvail,
     renewablemap,
@@ -50,6 +50,9 @@ ucmodel = STESTS.unitcommitment(
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
     VOLL = 9000.0, # value of lost load, $/MWh
 )
+
+#  Formulate economic dispatch model
+# edmodel = STESTS.economicdispatch()
 
 # Edit unit commitment model here
 # set optimizer, set add_bridges = false if model is supported by solver
@@ -73,7 +76,7 @@ latex_formulation(ucmodel)
 # Edit economic dispatch model here
 
 # Solve
-cost = STESTS.solving(1, D, ucmodel, Horizon = UCHorizon)
+cost = STESTS.solving(1, L, ucmodel, Horizon = UCHorizon)
 
 # optimize!(ucmodel)
 

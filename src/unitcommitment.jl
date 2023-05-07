@@ -7,11 +7,11 @@ Nik's note: In julia vectorized functions are not requireed for performance.
             For readability, I write constriants in for loops.
 
 # Methods
-unitcommitment(D::Matrix{Float64})::JuMP.Model -> Multi-bus ucmodel
-unitcommitment(D::Vector{Float64})::JuMP.Model -> Single-bus ucmodel
+unitcommitment(L::Matrix{Float64})::JuMP.Model -> Multi-bus ucmodel
+unitcommitment(L::Vector{Float64})::JuMP.Model -> Single-bus ucmodel
 """
 function unitcommitment(
-    D::Matrix{Float64}, # demand
+    L::Matrix{Float64}, # Load
     genmap::Matrix{Int64}, # generator map
     GPmax::Vector{Float64}, # generator maximum output
     GPmin::Vector{Float64}, # generator minimum output
@@ -25,7 +25,7 @@ function unitcommitment(
     GSUC::Vector{Float64}, # generator start-up cost
     GUT::Vector{Float64}, # generator minimum up time
     GDT::Vector{Float64}, # generator minimum down time
-    GPIni::Vector{Float64}, # generator initial output
+    GPini::Vector{Float64}, # generator initial output
     hydromap::Matrix{Int64}, # hydro map
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
@@ -35,7 +35,7 @@ function unitcommitment(
     RM::Float64 = 0.0, # reserve margin
 )::JuMP.Model
     ntimepoints = Horizon # number of time points
-    nbus = size(D, 2) # number of buses
+    nbus = size(L, 1) # number of buses
     ntrans = size(transmap, 1) # number of transmission lines
     nucgen = size(genmap, 1) # number of conventional generators
     nhydro = size(hydromap, 1) # number of hydro generators
@@ -54,6 +54,8 @@ function unitcommitment(
     @variable(ucmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
     @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
+    @variable(ucmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
+
 
     # Define objective function and constraints
     @objective(
@@ -63,23 +65,23 @@ function unitcommitment(
     )
 
     # Bus wise load balance constraints with transmission
-    # @constraint(
-    #     ucmodel,
-    #     LoadBalance[i = 1:nbus, t = 1:ntimepoints],
-    #     sum(genmap[:, i] .* guc[:, t]) +
-    #     sum(hydromap[:, i] .* gh[:, t]) +
-    #     sum(renewablemap[:, i] .* gr[:, t]) +
-    #     sum(transmap[i, :] .== 1) .* f[transmap[i, :].==1, t] +
-    #     s[i, t] == D[i, t]
-    # )
     @constraint(
         ucmodel,
-        LoadBalance[t = 1:ntimepoints],
-        sum(guc[:, t]) + sum(gh[:, t]) + sum(gr[:, t]) + sum(s[:, t]) ==
-        sum(D[:, t])
+        LoadBalance[z = 1:nbus, t = 1:ntimepoints],
+        sum(genmap[:, z] .* guc[:, t]) +
+        sum(hydromap[:, z] .* gh[:, t]) +
+        sum(renewablemap[:, z] .* gr[:, t]) +
+        sum(transmap[:, z] .* f[:, t])+
+        s[z, t] == L[z, t]
     )
 
-    # set_name(LoadBalance, "LoadBalance")
+    # Load balance constraints without transmission
+    # @constraint(
+    #     ucmodel,
+    #     LoadBalance[t = 1:ntimepoints],
+    #     sum(guc[:, t]) + sum(gh[:, t]) + sum(gr[:, t]) + sum(s[:, t]) ==
+    #     sum(D[:, t])
+    # )
 
     # System reserve constraints, individual bus reserve in current version
     # @constraint(
@@ -90,29 +92,31 @@ function unitcommitment(
     #     sum(renewablemap[:, i] .* gr[:, t]) >= (1 + RM) * D[t, i]
     # )
 
-    # # Transmission limits
-    # @constraint(
-    #     ucmodel,
-    #     TXCapTo[i = 1:ntrans, t = 1:ntimepoints],
-    #     f[i, t] <= TFmax[i]
-    # )
-    # @constraint(
-    #     ucmodel,
-    #     TXCapFrom[i = 1:ntrans, t = 1:ntimepoints],
-    #     f[i, t] >= -TFmax[i]
-    # )
+    # # Transmission capacity limits
+    @constraint(
+        ucmodel,
+        TXCapTo[l = 1:ntrans, t = 1:ntimepoints],
+        f[l, t] <= TFmax[l]
+    )
+    @constraint(
+        ucmodel,
+        TXCapFrom[l = 1:ntrans, t = 1:ntimepoints],
+        f[l, t] >= -TFmax[l]
+    )
 
     # # DCOPF constraints
-    # @constraint(
-    #     ucmodel,
-    #     DCOPTX[i = 1:ntrans, t = 1:ntimepoints],
-    #     f[i, t] == TX[i] * (theta[i, t] - theta[i, t])
-    # )
+    # set reference angle
+    @constraint(ucmodel, REFBUS[t = 1:ntimepoints], θ[1,t] == 0)  
+    @constraint(
+        ucmodel,
+        DCOPTX[l = 1:ntrans, t = 1:ntimepoints],
+        f[l, t] == TX[l] * (θ[(findfirst(x -> x == 1, transmap[l,:])) , t] - θ[(findfirst(x -> x == -1, transmap[l,:])), t])
+    )
 
     # Power flow constraints
     # @constraint(
     #     ucmodel,
-    #     PowerFlow[i = 1:ntrans, t = 1:ntimepoints],
+    #     PowerFlow[i = 1:ntrans, t = 1:ntimep oints],
     #     f[i, t] ==
     #     (transmap[i, 1] - transmap[i, 2]) *
     #     TX[i] *
@@ -142,8 +146,8 @@ function unitcommitment(
         gr[i, t] <= RAvail[i, t]
     )
     # Ramping limits
-    @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPIni[i] <= GRU[i])
-    @constraint(ucmodel, RDIni[i = 1:nucgen], GPIni[i] - guc[i, 1] <= GRD[i])
+    @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])
+    @constraint(ucmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i])
     @constraint(
         ucmodel,
         RU[i = 1:nucgen, t = 1:Horizon-1],
