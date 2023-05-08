@@ -11,7 +11,7 @@ unitcommitment(L::Matrix{Float64})::JuMP.Model -> Multi-bus ucmodel
 unitcommitment(L::Vector{Float64})::JuMP.Model -> Single-bus ucmodel
 """
 function unitcommitment(
-    L::Matrix{Float64}, # Load
+    UCL::Matrix{Float64}, # Load
     genmap::Matrix{Int64}, # generator map
     GPmax::Vector{Float64}, # generator maximum output
     GPmin::Vector{Float64}, # generator minimum output
@@ -35,7 +35,7 @@ function unitcommitment(
     RM::Float64 = 0.0, # reserve margin
 )::JuMP.Model
     ntimepoints = Horizon # number of time points
-    nbus = size(L, 1) # number of buses
+    nbus = size(UCL, 1) # number of buses
     ntrans = size(transmap, 1) # number of transmission lines
     nucgen = size(genmap, 1) # number of conventional generators
     nhydro = size(hydromap, 1) # number of hydro generators
@@ -56,7 +56,6 @@ function unitcommitment(
     @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
     @variable(ucmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
 
-
     # Define objective function and constraints
     @objective(
         ucmodel,
@@ -71,8 +70,8 @@ function unitcommitment(
         sum(genmap[:, z] .* guc[:, t]) +
         sum(hydromap[:, z] .* gh[:, t]) +
         sum(renewablemap[:, z] .* gr[:, t]) +
-        sum(transmap[:, z] .* f[:, t])+
-        s[z, t] == L[z, t]
+        sum(transmap[:, z] .* f[:, t]) +
+        s[z, t] == UCL[z, t]
     )
 
     # Load balance constraints without transmission
@@ -106,11 +105,15 @@ function unitcommitment(
 
     # # DCOPF constraints
     # set reference angle
-    @constraint(ucmodel, REFBUS[t = 1:ntimepoints], θ[1,t] == 0)  
+    @constraint(ucmodel, REFBUS[t = 1:ntimepoints], θ[1, t] == 0)
     @constraint(
         ucmodel,
         DCOPTX[l = 1:ntrans, t = 1:ntimepoints],
-        f[l, t] == TX[l] * (θ[(findfirst(x -> x == 1, transmap[l,:])) , t] - θ[(findfirst(x -> x == -1, transmap[l,:])), t])
+        f[l, t] ==
+        TX[l] * (
+            θ[(findfirst(x -> x == 1, transmap[l, :])), t] -
+            θ[(findfirst(x -> x == -1, transmap[l, :])), t]
+        )
     )
 
     # Power flow constraints

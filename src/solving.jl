@@ -9,27 +9,29 @@ function solving(Nday, D, ucmodel::JuMP.Model; Horizon::Int = 24)
         nbus = size(DInput, 1)
         for t in 1:Horizon
             for z in 1:nbus
-                set_normalized_rhs(ucmodel[:LoadBalance][z,t], DInput[z, t])
+                set_normalized_rhs(ucmodel[:LoadBalance][z, t], DInput[z, t])
             end
         end
         # Solve unit commitment model
         optimize!(ucmodel)
-        # Extract solution
+        # Extract solution and solve economic dispatch model
         if termination_status(ucmodel) == MOI.OPTIMAL
-            # guc = value.(guc)
-            # u = value.(u)
+            u = value.(ucmodel[:u])
+            v = value.(ucmodel[:v])
+            z = value.(ucmodel[:z])
+            uccost = objective_value(ucmodel)
             # Update parameters
             # ...
             # # Solve economic dispatch model
-            # optimize!(edmodel)
+            optimize!(edmodel)
             # # Extract solution
-            # if termination_status(edmodel) == MOI.OPTIMAL
-            #     p = value.(p)
-            #     # Update parameters
-            #     # ...
-            # else
-            #     error("No optimal solution found.")
-            # end
+            if termination_status(edmodel) == MOI.OPTIMAL
+                # p = value.(p)
+                # Update parameters
+                # ...
+            else
+                error("No optimal solution found.")
+            end
         else
             error("No optimal solution found.")
         end

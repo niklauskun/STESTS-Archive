@@ -1,0 +1,1 @@
+# generate energy storage bid using deep learning
