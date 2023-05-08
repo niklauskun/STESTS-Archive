@@ -8,8 +8,8 @@ function solving(Nday, D, ucmodel::JuMP.Model; Horizon::Int = 24)
         DInput = convert(Matrix{Float64}, D[Horizon*(d-1)+1:Horizon*d, :]')
         nbus = size(DInput, 1)
         for t in 1:Horizon
-            for z in 1:nbus
-                set_normalized_rhs(ucmodel[:LoadBalance][z, t], DInput[z, t])
+            for b in 1:nbus
+                set_normalized_rhs(ucmodel[:LoadBalance][b, t], DInput[b, t])
             end
         end
         # Solve unit commitment model
@@ -19,7 +19,6 @@ function solving(Nday, D, ucmodel::JuMP.Model; Horizon::Int = 24)
             u = value.(ucmodel[:u])
             v = value.(ucmodel[:v])
             z = value.(ucmodel[:z])
-            uccost = objective_value(ucmodel)
             # Update parameters
             # ...
             # # Solve economic dispatch model
@@ -30,10 +29,10 @@ function solving(Nday, D, ucmodel::JuMP.Model; Horizon::Int = 24)
                 # Update parameters
                 # ...
             else
-                error("No optimal solution found.")
+                error("No optimal solution found for ED.")
             end
         else
-            error("No optimal solution found.")
+            error("No optimal solution found for UC.")
         end
     end
     return objective_value(ucmodel)
