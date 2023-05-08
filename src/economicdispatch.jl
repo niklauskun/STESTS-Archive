@@ -13,7 +13,10 @@ function economicdispatch(
     hydromap::Matrix{Int64}, # hydro map
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
-    RAvail::Matrix{Float64}; # renewable availability
+    RAvail::Matrix{Float64}, # renewable availability
+    U::Matrix{Int}, # Conventional generator status, 1 if on, 0 if off
+    V::Matrix{Int}, # Conventional generator start-up descison, 1 if start-up, 0 otherwise
+    Z::Matrix{Int}; # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
     EDHorizon::Int = 1, # planning horizon
     EDSteps::Int = 12, # planning steps
     VOLL::Float64 = 9000.0, # value of lost load
@@ -39,7 +42,12 @@ function economicdispatch(
     @variable(edmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
 
     # Define objective function and constraints
-    @objective(edmodel, Min, sum(GMC .* guc) + sum(VOLL .* s))
+    @objective(
+        edmodel,
+        Min,
+        sum(GMC .* guc + GNLC .* U + GSUC .* V) / EDSteps +
+        sum(VOLL .* s) / EDSteps
+    )
 
     # Bus wise load balance constraints with transmission
     @constraint(
