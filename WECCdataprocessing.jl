@@ -1,7 +1,7 @@
 using XLSX
 using DataFrames
 using JLD2
-
+using Interpolations
 # read excel file in multiple books and return a dictionary of DataFrames
 filename = "./Input_Data_WECC240.xlsx"
 @info "Reading data from $filename..."
@@ -81,13 +81,13 @@ timereaddata = @elapsed begin
     @assert length(RPmax) == length(RPmin) == size(renewablemap, 1) "Renewable data length mismatch."
 
     # read demand data
-    D = XLSX.readdata(filename, "Load!D3:II8786") # read demand, in MW
+    UCL = XLSX.readdata(filename, "Load!D3:II8786") # read demand, in MW
     @assert size(transmap, 2) ==
             size(genmap, 2) ==
             size(hydromap, 2) ==
             size(renewablemap, 2) ==
-            size(D, 2) "Bus number mismatch."
-    @assert size(HAvail, 1) == size(RAvail, 1) == size(D, 1) "Time step mismatch."
+            size(UCL, 2) "Bus number mismatch."
+    @assert size(HAvail, 1) == size(RAvail, 1) == size(UCL, 1) "Time step mismatch."
 
     # replace missing data to 0
     transmap = replace(transmap, missing => 0)
@@ -121,7 +121,50 @@ timereaddata = @elapsed begin
     RPmax = convert(Vector{Float64}, RPmax)
     RPmin = convert(Vector{Float64}, RPmin)
     RAvail = convert(Matrix{Float64}, RAvail)
-    D = convert(Matrix{Float64}, D)
+    UCL = convert(Matrix{Float64}, UCL)
+
+    EDL = zeros(105408, size(UCL, 2))
+    EDHAvail = zeros(105408, size(HAvail, 2))
+    EDRAvail = zeros(105408, size(RAvail, 2))
+
+    for i in axes(UCL, 2)
+        # Create an interpolation object for the current column
+        itp = interpolate(UCL[:, i], BSpline(Linear()))
+
+        # Scale the interpolation to the desired number of points
+        scale = length(itp) / size(EDL, 1)
+
+        # Fill the new matrix with the interpolated data
+        for j in 1:size(EDL, 1)-12+1
+            EDL[j, i] = itp((j - 1) * scale + 1)
+        end
+    end
+
+    for i in axes(HAvail, 2)
+        # Create an interpolation object for the current column
+        itp = interpolate(HAvail[:, i], BSpline(Linear()))
+
+        # Scale the interpolation to the desired number of points
+        scale = length(itp) / size(EDHAvail, 1)
+
+        # Fill the new matrix with the interpolated data
+        for j in 1:size(EDHAvail, 1)-12+1
+            EDHAvail[j, i] = itp((j - 1) * scale + 1)
+        end
+    end
+
+    for i in axes(RAvail, 2)
+        # Create an interpolation object for the current column
+        itp = interpolate(RAvail[:, i], BSpline(Linear()))
+
+        # Scale the interpolation to the desired number of points
+        scale = length(itp) / size(EDRAvail, 1)
+
+        # Fill the new matrix with the interpolated data
+        for j in 1:size(EDRAvail, 1)-12+1
+            EDRAvail[j, i] = itp((j - 1) * scale + 1)
+        end
+    end
 
     # if data folder not exist, create a new folder
     isdir("data") || mkdir("data")
@@ -179,8 +222,14 @@ timereaddata = @elapsed begin
         RPmin,
         "RAvail",
         RAvail,
-        "D",
-        D,
+        "UCL",
+        UCL,
+        "EDL",
+        EDL,
+        "EDHAvail",
+        EDHAvail,
+        "EDRAvail",
+        EDRAvail,
     )
 end
 @info "Reading data took $timereaddata seconds."

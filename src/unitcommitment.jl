@@ -32,7 +32,7 @@ function unitcommitment(
     RAvail::Matrix{Float64}; # renewable availability
     Horizon::Int = 24, # planning horizon
     VOLL::Float64 = 9000.0, # value of lost load
-    RM::Float64 = 0.0, # reserve margin
+    RM::Float64 = 0.2, # reserve margin
 )::JuMP.Model
     ntimepoints = Horizon # number of time points
     nbus = size(UCL, 1) # number of buses
@@ -50,7 +50,7 @@ function unitcommitment(
     @variable(ucmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
     @variable(ucmodel, u[1:nucgen, 1:ntimepoints], Bin) # Conventional generator status, 1 if on, 0 if off
     @variable(ucmodel, v[1:nucgen, 1:ntimepoints], Bin) # Conventional generator start-up descison, 1 if start-up, 0 otherwise
-    @variable(ucmodel, z[1:nucgen, 1:ntimepoints], Bin) # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
+    @variable(ucmodel, w[1:nucgen, 1:ntimepoints], Bin) # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
     @variable(ucmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
     @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
@@ -66,53 +66,54 @@ function unitcommitment(
     # Bus wise load balance constraints with transmission
     @constraint(
         ucmodel,
-        LoadBalance[z = 1:nbus, t = 1:ntimepoints],
-        sum(genmap[:, z] .* guc[:, t]) +
-        sum(hydromap[:, z] .* gh[:, t]) +
-        sum(renewablemap[:, z] .* gr[:, t]) +
-        sum(transmap[:, z] .* f[:, t]) +
-        s[z, t] == UCL[z, t]
+        LoadBalance[z = 1:nbus, h = 1:ntimepoints],
+        sum(genmap[:, z] .* guc[:, h]) +
+        sum(hydromap[:, z] .* gh[:, h]) +
+        sum(renewablemap[:, z] .* gr[:, h]) +
+        sum(transmap[:, z] .* f[:, h]) +
+        s[z, h] == UCL[z, h]
     )
 
     # Load balance constraints without transmission
     # @constraint(
     #     ucmodel,
-    #     LoadBalance[t = 1:ntimepoints],
-    #     sum(guc[:, t]) + sum(gh[:, t]) + sum(gr[:, t]) + sum(s[:, t]) ==
-    #     sum(D[:, t])
+    #     LoadBalance[h = 1:ntimepoints],
+    #     sum(guc[:, h]) + sum(gh[:, h]) + sum(gr[:, h]) + sum(s[:, h]) ==
+    #     sum(UCL[:, h])
     # )
 
-    # System reserve constraints, individual bus reserve in current version
+    # # System reserve constraints
     # @constraint(
     #     ucmodel,
-    #     Reserve[i = 1:nbus, t = 1:ntimepoints],
-    #     sum(genmap[:, i] .* guc[:, t]) +
-    #     sum(hydromap[:, i] .* gh[:, t]) +
-    #     sum(renewablemap[:, i] .* gr[:, t]) >= (1 + RM) * D[t, i]
+    #     Reserve[h = 1:ntimepoints],
+    #     sum(guc[:, h]) + 
+    #     sum(GRU .* u[:,h]) +
+    #     sum(HAvail[:, h]) +
+    #     sum(RAvail[:, h]) >= (1 + RM) * sum(UCL[:, h])
     # )
 
     # # Transmission capacity limits
     @constraint(
         ucmodel,
-        TXCapTo[l = 1:ntrans, t = 1:ntimepoints],
-        f[l, t] <= TFmax[l]
+        TXCapTo[l = 1:ntrans, h = 1:ntimepoints],
+        f[l, h] <= TFmax[l]
     )
     @constraint(
         ucmodel,
-        TXCapFrom[l = 1:ntrans, t = 1:ntimepoints],
-        f[l, t] >= -TFmax[l]
+        TXCapFrom[l = 1:ntrans, h = 1:ntimepoints],
+        f[l, h] >= -TFmax[l]
     )
 
     # # DCOPF constraints
     # set reference angle
-    @constraint(ucmodel, REFBUS[t = 1:ntimepoints], θ[1, t] == 0)
+    @constraint(ucmodel, REFBUS[h = 1:ntimepoints], θ[1, h] == 0)
     @constraint(
         ucmodel,
-        DCOPTX[l = 1:ntrans, t = 1:ntimepoints],
-        f[l, t] ==
+        DCOPTX[l = 1:ntrans, h = 1:ntimepoints],
+        f[l, h] ==
         TX[l] * (
-            θ[(findfirst(x -> x == 1, transmap[l, :])), t] -
-            θ[(findfirst(x -> x == -1, transmap[l, :])), t]
+            θ[(findfirst(x -> x == 1, transmap[l, :])), h] -
+            θ[(findfirst(x -> x == -1, transmap[l, :])), h]
         )
     )
 
@@ -129,37 +130,37 @@ function unitcommitment(
     # Conventional generator capacity limits
     @constraint(
         ucmodel,
-        UCCapU[i = 1:nucgen, t = 1:Horizon],
-        guc[i, t] <= u[i, t] * GPmax[i]
+        UCCapU[i = 1:nucgen, h = 1:Horizon],
+        guc[i, h] <= u[i, h] * GPmax[i]
     )
     @constraint(
         ucmodel,
-        UCCapL[i = 1:nucgen, t = 1:Horizon],
-        guc[i, t] >= u[i, t] * GPmin[i]
+        UCCapL[i = 1:nucgen, h = 1:Horizon],
+        guc[i, h] >= u[i, h] * GPmin[i]
     )
     # Hydro and renewable capacity limits
     @constraint(
         ucmodel,
-        HCap[i = 1:nhydro, t = 1:Horizon],
-        gh[i, t] <= HAvail[i, t]
+        HCap[i = 1:nhydro, h = 1:Horizon],
+        gh[i, h] <= HAvail[i, h]
     )
     @constraint(
         ucmodel,
-        ReCap[i = 1:nrenewable, t = 1:Horizon],
-        gr[i, t] <= RAvail[i, t]
+        ReCap[i = 1:nrenewable, h = 1:Horizon],
+        gr[i, h] <= RAvail[i, h]
     )
     # Ramping limits
     @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])
     @constraint(ucmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i])
     @constraint(
         ucmodel,
-        RU[i = 1:nucgen, t = 1:Horizon-1],
-        guc[i, t+1] - guc[i, t] <= GRU[i]
+        RU[i = 1:nucgen, h = 1:Horizon-1],
+        guc[i, h+1] - guc[i, h] <= GRU[i]
     )
     @constraint(
         ucmodel,
-        RD[i = 1:nucgen, t = 1:Horizon-1],
-        guc[i, t] - guc[i, t+1] <= GRD[i]
+        RD[i = 1:nucgen, h = 1:Horizon-1],
+        guc[i, h] - guc[i, h+1] <= GRD[i]
     )
 
     # State transition constraints

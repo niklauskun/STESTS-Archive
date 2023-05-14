@@ -1,4 +1,4 @@
-using STESTS, JuMP, Gurobi
+using STESTS, JuMP, Gurobi, CSV, DataFrames
 
 # Read data from .jld2 file
 UCL, # hourly load for unit commitment, MW
@@ -19,17 +19,29 @@ GPini, # initial power output of generators
 hydromap, # map of hydro units
 HAvail, # availability of hydro units
 renewablemap, # map of renewable units
-RAvail = STESTS.read_jld2("./data/WECC240.jld2")
+RAvail,
+EDL,
+EDHAvail,
+EDRAvail = STESTS.read_jld2("./data/WECC240.jld2")
 
 UCHorizon = Int(24) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-NDay = Int(size(UCL, 1) / UCHorizon)
+# NDay = Int(size(UCL, 1) / UCHorizon)
+NDay = 1
 EDSteps = Int(12) # number of 5-min intervals in a hour
-EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
+
+# EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
+# EDHAvail = repeat(HAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
+# EDRAvail = repeat(RAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
 #select first UCHorizon rows of UCL as initial input to unit commitment model
 UCLInput = convert(Matrix{Float64}, UCL[1:UCHorizon, :]')
+UCHAvailInput = convert(Matrix{Float64}, HAvail[1:UCHorizon, :]')
+UCRAvailInput = convert(Matrix{Float64}, RAvail[1:UCHorizon, :]')
 #select first EDHorizon rows of EDL as initial input to economic dispatch model
 EDLInput = convert(Matrix{Float64}, EDL[1:EDHorizon, :]')
+EDHAvailInput = convert(Matrix{Float64}, EDHAvail[1:EDHorizon, :]')
+EDRAvailInput = convert(Matrix{Float64}, EDRAvail[1:EDHorizon, :]')
+UInput = zeros(Int, size(genmap,1), 1)
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
@@ -49,11 +61,12 @@ ucmodel = STESTS.unitcommitment(
     GDT,
     GPini,
     hydromap,
-    HAvail,
+    UCHAvailInput,
     renewablemap,
-    RAvail,
+    UCRAvailInput,
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
     VOLL = 9000.0, # value of lost load, $/MWh
+    RM = 0.2, # reserve margin, 20%
 )
 
 # Edit unit commitment model here
@@ -74,32 +87,64 @@ edmodel = STESTS.economicdispatch(
     transmap,
     TX,
     TFmax,
+    GNLC,
+    GRU,
+    GRD,
     GPini,
     hydromap,
-    HAvail,
+    EDHAvailInput,
     renewablemap,
-    RAvail,
-    Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
+    EDRAvailInput,
+    UInput,
+    Horizon = EDHorizon,
+    Steps = EDSteps, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
     VOLL = 9000.0, # value of lost load, $/MWh
 )
 
 # Edit economic dispatch model here
 # set optimizer, set add_bridges = false if model is supported by solver
 set_optimizer(edmodel, Gurobi.Optimizer, add_bridges = false)
-
 # # modify objective function
 # @objective(edmodel, Min, 0.0)
 # # modify or add constraints
 # @constraint(edmodel, 0.0 <= edmodel[:P][1,1] <= 0.0)
 
 # Solve
-cost = STESTS.solving(
-    1,
-    UCL,
-    EDL,
-    ucmodel,
-    edmodel,
-    UCHorizon = UCHorizon,
-    EDSteps = EDSteps,
-    EDHorizon = EDHorizon,
-)
+timesolve = @elapsed begin
+    UCcost, UCnetgen, UCgen, EDcost = STESTS.solving(
+        NDay,
+        UCL,
+        HAvail,
+        RAvail,
+        GRU,
+        GRD,
+        GPmax,
+        GPmin,
+        EDL,
+        EDHAvail,
+        EDRAvail,
+        ucmodel,
+        edmodel,
+        UCHorizon = UCHorizon,
+        EDHorizon = EDHorizon,
+        EDSteps = EDSteps,
+    )
+    end
+@info "Reading data took $timesolve seconds."
+# STESTS.solving(
+#     1,
+#     UCL,
+#     EDL,
+#     ucmodel,
+#     edmodel,
+#     UCHorizon = UCHorizon,
+#     EDSteps = EDSteps,
+#     EDHorizon = EDHorizon,
+# )
+
+
+CSV.write("UCgen.csv", DataFrame(UCgen, :auto))
+CSV.write("UCnetgen.csv", DataFrame(UCnetgen, :auto))
+
+println("The UC cost is: ", sum(UCcost))
+println("The ED cost is: ", sum(EDcost))

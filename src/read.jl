@@ -17,7 +17,7 @@ function read_jld2(filename::String)
     data = load(filename)
     @info "Done"
     return (
-        D = data["D"],
+        UCL = data["UCL"],
         genmap = data["genmap"],
         GPmax = data["GPmax"],
         GPmin = data["GPmin"],
@@ -36,5 +36,8 @@ function read_jld2(filename::String)
         HAvail = data["HAvail"],
         renewablemap = data["renewablemap"],
         RAvail = data["RAvail"],
+        EDL = data["EDL"],
+        EDHAvail = data["EDHAvail"],
+        EDRAvail = data["EDRAvail"],
     )
 end

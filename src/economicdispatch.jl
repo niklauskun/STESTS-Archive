@@ -9,20 +9,21 @@ function economicdispatch(
     transmap::Matrix{Int64}, # transmission map
     TX::Vector{Float64}, # transmission reactance
     TFmax::Vector{Float64}, # transmission maximum flow,
+    GNLC::Vector{Float64}, # generator non-load-carrying cost
+    GRU::Vector{Float64}, # generator ramp up rate
+    GRD::Vector{Float64}, # generator ramp down rate
     GPini::Vector{Float64}, # generator initial output
     hydromap::Matrix{Int64}, # hydro map
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
     RAvail::Matrix{Float64}, # renewable availability
-    U::Matrix{Int}, # Conventional generator status, 1 if on, 0 if off
-    V::Matrix{Int}, # Conventional generator start-up descison, 1 if start-up, 0 otherwise
-    Z::Matrix{Int}; # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
-    EDHorizon::Int = 1, # planning horizon
-    EDSteps::Int = 12, # planning steps
+    U::Matrix{Int}; # Conventional generator status, 1 if on, 0 if off
+    Horizon::Int = 1, # planning horizon
+    Steps::Int = 12, # planning steps
     VOLL::Float64 = 9000.0, # value of lost load
-    RM::Float64 = 0.0, # reserve margin
+    RM::Float64 = 0.2, # reserve margin
 )::JuMP.Model
-    ntimepoints = EDHorizon # number of time points
+    ntimepoints = Horizon # number of time points
     nbus = size(EDL, 1) # number of buses
     ntrans = size(transmap, 1) # number of transmission lines
     nucgen = size(genmap, 1) # number of conventional generators
@@ -45,36 +46,36 @@ function economicdispatch(
     @objective(
         edmodel,
         Min,
-        sum(GMC .* guc + GNLC .* U + GSUC .* V) / EDSteps +
-        sum(VOLL .* s) / EDSteps
+        sum(GMC .* guc + GNLC .* U) / Steps +
+        sum(VOLL .* s) / Steps
     )
 
     # Bus wise load balance constraints with transmission
     @constraint(
         edmodel,
-        LoadBalance[b = 1:nbus, t = 1:ntimepoints],
-        sum(genmap[:, b] .* guc[:, t]) +
-        sum(hydromap[:, b] .* gh[:, t]) +
-        sum(renewablemap[:, b] .* gr[:, t]) +
-        sum(transmap[:, b] .* f[:, t]) +
-        s[b, t] == EDL[b, t]
+        LoadBalance[z = 1:nbus, t = 1:ntimepoints],
+        sum(genmap[:, z] .* guc[:, t]) +
+        sum(hydromap[:, z] .* gh[:, t]) +
+        sum(renewablemap[:, z] .* gr[:, t]) +
+        sum(transmap[:, z] .* f[:, t]) +
+        s[z, t] == EDL[z, t]
     )
 
     # Load balance constraints without transmission
     # @constraint(
-    #     ucmodel,
+    #     edmodel,
     #     LoadBalance[t = 1:ntimepoints],
     #     sum(guc[:, t]) + sum(gh[:, t]) + sum(gr[:, t]) + sum(s[:, t]) ==
-    #     sum(D[:, t])
+    #     sum(EDL[:, t])
     # )
 
-    # System reserve constraints, individual bus reserve in current version
+    # System reserve constraints
     # @constraint(
-    #     ucmodel,
-    #     Reserve[i = 1:nbus, t = 1:ntimepoints],
-    #     sum(genmap[:, i] .* guc[:, t]) +
-    #     sum(hydromap[:, i] .* gh[:, t]) +
-    #     sum(renewablemap[:, i] .* gr[:, t]) >= (1 + RM) * D[t, i]
+    #     edmodel,
+    #     Reserve[t = 1:ntimepoints],
+    #     sum(guc[:, t]) +
+    #     sum(gh[:, t]) +
+    #     sum(gr[:, t]) >= (1 + RM) * sum(EDL[:, t])
     # )
 
     # # Transmission capacity limits
@@ -138,12 +139,12 @@ function economicdispatch(
     @constraint(
         edmodel,
         RUIni[i = 1:nucgen],
-        guc[i, 1] - GPini[i] <= GRU[i] / EDSteps
+        guc[i, 1] - GPini[i] <= GRU[i] / Steps
     )
     @constraint(
         edmodel,
         RDIni[i = 1:nucgen],
-        GPini[i] - guc[i, 1] <= GRD[i] / EDSteps
+        GPini[i] - guc[i, 1] <= GRD[i] / Steps
     )
     # if EDHorizon > 1
     # @constraint(
@@ -156,27 +157,5 @@ function economicdispatch(
     #     RD[i = 1:nucgen, t = 1:Horizon-1],
     #     guc[i, t] - guc[i, t+1] <= GRD[i]
     # )
-
-    # State transition constraints
-    # @constraint(ucmodel, U0[i = 1:nucgen], u[i, 1] == u[i, ntimepoints])
-    # Minimum up/down time constraints
-    # @constraint(
-    #     ucmodel,
-    #     UT[i = 1:nucgen],
-    #     u[i, 1] - U0[i] <= (1 - u[i, t]) * GUT[i]
-    # )
-    # if t > 1
-    #     ### Minimum up/down time constraints
-    #     for i in 1:nucgen
-    #         @constraint(
-    #             ucmodel,
-    #             u[i, t] - u[i, t-1] <= (1 - u[i, t]) * GUT[i]
-    #         )
-    #         @constraint(
-    #             ucmodel,
-    #             u[i, t-1] - u[i, t] <= (1 - u[i, t-1]) * GDT[i]
-    #         )
-    #     end
-    # end
     return edmodel
 end
