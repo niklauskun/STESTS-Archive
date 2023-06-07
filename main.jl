@@ -22,7 +22,7 @@ renewablemap, # map of renewable units
 RAvail,
 EDL,
 EDHAvail,
-EDRAvail = STESTS.read_jld2("./data/WECC240.jld2")
+EDRAvail = STESTS.read_jld2("./data/ADS2032.jld2")
 
 UCHorizon = Int(24) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 # NDay = Int(size(UCL, 1) / UCHorizon)
@@ -30,7 +30,7 @@ NDay = 1
 EDSteps = Int(12) # number of 5-min intervals in a hour
 
 # EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
-# EDHAvail = repeat(HAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
+#   # load for economic dispatch, MW, repeat by ED steps w/o noise
 # EDRAvail = repeat(RAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
 #select first UCHorizon rows of UCL as initial input to unit commitment model
@@ -41,7 +41,7 @@ UCRAvailInput = convert(Matrix{Float64}, RAvail[1:UCHorizon, :]')
 EDLInput = convert(Matrix{Float64}, EDL[1:EDHorizon, :]')
 EDHAvailInput = convert(Matrix{Float64}, EDHAvail[1:EDHorizon, :]')
 EDRAvailInput = convert(Matrix{Float64}, EDRAvail[1:EDHorizon, :]')
-UInput = zeros(Int, size(genmap,1), 1)
+UInput = convert(Array{Int64, 1}, GPini .!= 0) # initial status of generators, 1 if on, 0 if off
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
@@ -60,6 +60,7 @@ ucmodel = STESTS.unitcommitment(
     GUT,
     GDT,
     GPini,
+    UInput,
     hydromap,
     UCHAvailInput,
     renewablemap,
@@ -120,6 +121,10 @@ timesolve = @elapsed begin
         GRD,
         GPmax,
         GPmin,
+        GPini,
+        GMC,
+        GNLC,
+        GSUC,
         EDL,
         EDHAvail,
         EDRAvail,
@@ -128,9 +133,10 @@ timesolve = @elapsed begin
         UCHorizon = UCHorizon,
         EDHorizon = EDHorizon,
         EDSteps = EDSteps,
+        VOLL = 9000.0,
     )
     end
-@info "Reading data took $timesolve seconds."
+@info "Solving took $timesolve seconds."
 # STESTS.solving(
 #     1,
 #     UCL,
@@ -143,8 +149,8 @@ timesolve = @elapsed begin
 # )
 
 
-CSV.write("UCgen.csv", DataFrame(UCgen, :auto))
-CSV.write("UCnetgen.csv", DataFrame(UCnetgen, :auto))
+CSV.write("output/UCgentotal.csv", DataFrame(UCgen, :auto))
+CSV.write("output/UCnetgentotal.csv", DataFrame(UCnetgen, :auto))
 
 println("The UC cost is: ", sum(UCcost))
 println("The ED cost is: ", sum(EDcost))

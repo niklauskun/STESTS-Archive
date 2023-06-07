@@ -1,0 +1,248 @@
+using CSV
+using DataFrames
+using JLD2
+using Interpolations
+# read CSV files
+
+folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
+@info "Reading data from $folder..."
+timereaddata = @elapsed begin
+    # read transmission data
+    transmap = Matrix(CSV.read(joinpath(folder, "TransmissionMap.csv"), DataFrame)[:,2:end]) # read transmission line map
+    transdata = CSV.read(joinpath(folder, "Transmission.csv"), DataFrame)
+    TX = transdata[!,:"X"] # read transmission reactance, in p.u.
+    TFmax = transdata[!,:"Max Flow(MW)"] # read transmission line capacity, in MW
+#     THurdle = transdata[!,:"Hurdle Rate($/MW)"] # read transmission line hurdle rate, in $/MW
+    @assert length(TX) == length(TFmax) == size(transmap, 1) "Transmission data length mismatch."
+
+    # read generator data
+    genmap =  Matrix(CSV.read(joinpath(folder, "ThermalGenMap.csv"), DataFrame)[:,2:end]) # read generator map
+    gendata = CSV.read(joinpath(folder, "ThermalGen.csv"), DataFrame)
+    GPmax = gendata[!,:"IOMaxCap(MW)"] # read generator maximum capacity, in MW
+    GPmin = gendata[!,:"IOMinCap(MW)"] # read generator minimum capacity, in MW
+    GNLC = gendata[!,:"NoLoadCost(\$)"] # read generator non-load cost, in $
+    GMC = gendata[!,:"IncCost2(\$/MW)"] # read generator marginal cost, in $/MW
+    GType = gendata[!,:"SubType"] # read generator type
+    GRU = gendata[!,:"RampUp Rate(MW/minute)"] * 60 # read generator ramp up rate, in MW/hour
+    GRD = gendata[!,:"RampDn Rate(MW/minute)"] * 60 # read generator ramp down rate, in MW/hour
+    GSUC = gendata[!,:"Start Up Cost(\$)"] # read generator start-up cost, in $
+    GUT =  gendata[!,:"MinimumUpTime(hr)"] # read generator minimum up time, in hour
+    GDT = gendata[!,:"MinimumDownTime(hr)"] # read generator minimum down time, in hour
+    GPIni = gendata[!,:"InitialDispatch(MW)"] # read generator initial output
+    @assert length(GPmax) ==
+            length(GPmin) ==
+            length(GNLC) ==
+            length(GMC) ==
+            length(GType) ==
+            length(GRU) ==
+            length(GRD) ==
+            length(GSUC) ==
+            length(GUT) ==
+            length(GDT) ==
+            length(GPIni) ==
+            size(genmap, 1) "Generator data length mismatch."
+
+    # read hydro data
+    hydromap = Matrix(CSV.read(joinpath(folder, "HydroMap.csv"), DataFrame)[:,2:end]) # read hydro map
+    hydrodata = CSV.read(joinpath(folder, "Hydro.csv"), DataFrame)
+    HPmax = hydrodata[!,:"MaxCap(MW)"] # read hydro maximum capacity, in MW    
+    HPmin = hydrodata[!,:"MinCap(MW)"] # read hydro minimum capacity, in MW
+    HAvail = Matrix(CSV.read(joinpath(folder, "HydroProfile.csv"), DataFrame)[:,2:end]) # read hydro availability, in MW
+    # HAvail value less than HPmin, set to HPmin, value greater than HPmax, set to HPmax
+#     for columns in axes(HAvail, 2)
+#         for rows in axes(HAvail, 1)
+#             if HAvail[rows, columns] < HPmin[columns]
+#                 HAvail[rows, columns] = HPmin[columns]
+#                 @info "Hydro availability less than minimum capacity at row $rows, column $columns."
+#             elseif HAvail[rows, columns] > HPmax[columns]
+#                 HAvail[rows, columns] = HPmax[columns]
+#                 @info "Hydro availability less than minimum capacity at row $rows, column $columns."
+#             end
+#         end
+#     end
+#     HRamp = vec(XLSX.readdata(filename, "HydroRamp!B3:B29")) # read hydro ramp rate, in MW/hour
+    @assert length(HPmax) == length(HPmin) == size(hydromap, 1) == size(HAvail,2) "Hydro data length mismatch."
+
+    # read renewable data
+    solarmap = Matrix(CSV.read(joinpath(folder, "SolarMap.csv"), DataFrame)[:,2:end])
+    windmap = Matrix(CSV.read(joinpath(folder, "WindMap.csv"), DataFrame)[:,2:end])
+    solarprofile = Matrix(CSV.read(joinpath(folder, "SolarProfile.csv"), DataFrame)[:,2:end])
+    windprofile = Matrix(CSV.read(joinpath(folder, "WindProfile.csv"), DataFrame)[:,2:end])
+    solardata = CSV.read(joinpath(folder, "Solar.csv"), DataFrame)
+    winddata = CSV.read(joinpath(folder, "Wind.csv"), DataFrame)
+    solarPmax = solardata[!,:"Capacity(MW)"] # read solar maximum capacity, in MW
+    windPmax = winddata[!,:"Capacity(MW)"] # read wind maximum capacity, in MW
+    renewablemap = vcat(solarmap, windmap)
+    RPmax = vcat(solarPmax, windPmax)
+    RAvail = hcat(solarprofile, windprofile)
+#     renewablemap = XLSX.readdata(filename, "TotalRenewable", "G3:IL61") # read renewable map
+#     RPmax = vec(XLSX.readdata(filename, "TotalRenewable!B3:B61")) # read renewable maximum capacity, in MW
+#     RPmin = vec(XLSX.readdata(filename, "TotalRenewable!D3:D61")) # read renewable minimum capacity, in MW
+#     RAvail = XLSX.readdata(filename, "TotalRenewable!JD3:LJ8786") # read renewable availability, in MW
+#     # RAvail value less than RPmin, set to RPmin, value greater than RPmax, set to RPmax
+#     for columns in axes(RAvail, 2)
+#         for rows in axes(RAvail, 1)
+#             if RAvail[rows, columns] < RPmin[columns]
+#                 RAvail[rows, columns] = RPmin[columns]
+#                 @info "Renewable availability less than minimum capacity at row $rows, column $columns."
+#             elseif RAvail[rows, columns] > RPmax[columns]
+#                 RAvail[rows, columns] = RPmax[columns]
+#                 @info "Renewable availability less than minimum capacity at row $rows, column $columns."
+#             end
+#         end
+#     end
+    @assert length(RPmax) == size(renewablemap, 1) == size(RAvail,2) "Renewable data length mismatch."
+
+#     # read demand data
+    UCL = Matrix(CSV.read(joinpath(folder, "Load.csv"), DataFrame)[:,2:end]) # read demand, in MW
+    @assert size(transmap, 2) ==
+            size(genmap, 2) ==
+            size(hydromap, 2) ==
+            size(renewablemap, 2) ==
+            size(UCL, 2) "Bus number mismatch."
+    @assert size(HAvail, 1) == size(RAvail, 1) == size(UCL, 1) "Time step mismatch."
+
+#     # replace missing data to 0
+#     transmap = replace(transmap, missing => 0)
+#     genmap = replace(genmap, missing => 0)
+#     hydromap = replace(hydromap, missing => 0)
+#     renewablemap = replace(renewablemap, missing => 0)
+
+#     # convert data to Julia data type
+    transmap = convert(Matrix{Int64}, transmap)
+    TX = convert(Vector{Float64}, TX)
+    TFmax = convert(Vector{Float64}, TFmax)
+    # THurdle = convert(Vector{Float64}, THurdle)
+    genmap = convert(Matrix{Int64}, genmap)
+    GPmax = convert(Vector{Float64}, GPmax)
+    GPmin = convert(Vector{Float64}, GPmin)
+    GNLC = convert(Vector{Float64}, GNLC)
+    GMC = convert(Vector{Float64}, GMC)
+    GType = convert(Vector{String}, GType)
+    GRU = convert(Vector{Float64}, GRU)
+    GRD = convert(Vector{Float64}, GRD)
+    GSUC = convert(Vector{Float64}, GSUC)
+    GUT = convert(Vector{Int64}, GUT)
+    GDT = convert(Vector{Int64}, GDT)
+    GPIni = convert(Vector{Float64}, GPIni)
+    hydromap = convert(Matrix{Int64}, hydromap)
+    HPmax = convert(Vector{Float64}, HPmax)
+    HPmin = convert(Vector{Float64}, HPmin)
+    HAvail = convert(Matrix{Float64}, HAvail)
+    # HRamp = convert(Vector{Float64}, HRamp)
+    renewablemap = convert(Matrix{Int64}, renewablemap)
+    RPmax = convert(Vector{Float64}, RPmax)
+    # RPmin = convert(Vector{Float64}, RPmin)
+    RAvail = convert(Matrix{Float64}, RAvail)
+    UCL = convert(Matrix{Float64}, UCL)
+
+    EDL = zeros(105408, size(UCL, 2))
+    EDHAvail = zeros(105408, size(HAvail, 2))
+    EDRAvail = zeros(105408, size(RAvail, 2))
+
+    for i in axes(UCL, 2)
+        # Create an interpolation object for the current column
+        itp = interpolate(UCL[:, i], BSpline(Linear()))
+
+        # Scale the interpolation to the desired number of points
+        scale = length(itp) / size(EDL, 1)
+
+        # Fill the new matrix with the interpolated data
+        for j in 1:size(EDL, 1)-12+1
+            EDL[j, i] = itp((j - 1) * scale + 1)
+        end
+    end
+
+    for i in axes(HAvail, 2)
+        # Create an interpolation object for the current column
+        itp = interpolate(HAvail[:, i], BSpline(Linear()))
+
+        # Scale the interpolation to the desired number of points
+        scale = length(itp) / size(EDHAvail, 1)
+
+        # Fill the new matrix with the interpolated data
+        for j in 1:size(EDHAvail, 1)-12+1
+            EDHAvail[j, i] = itp((j - 1) * scale + 1)
+        end
+    end
+
+    for i in axes(RAvail, 2)
+        # Create an interpolation object for the current column
+        itp = interpolate(RAvail[:, i], BSpline(Linear()))
+
+        # Scale the interpolation to the desired number of points
+        scale = length(itp) / size(EDRAvail, 1)
+
+        # Fill the new matrix with the interpolated data
+        for j in 1:size(EDRAvail, 1)-12+1
+            EDRAvail[j, i] = itp((j - 1) * scale + 1)
+        end
+    end
+
+    # if data folder not exist, create a new folder
+    isdir("data") || mkdir("data")
+    #  save variables to jld2 file into data folder
+    @info "Saving data to ./data/WECC240.jld2..."
+    save(
+        "./data/ADS2032.jld2",
+        "transmap",
+        transmap,
+        "TX",
+        TX,
+        "TFmax",
+        TFmax,
+        # "THurdle",
+        # THurdle,
+        "genmap",
+        genmap,
+        "GPmax",
+        GPmax,
+        "GPmin",
+        GPmin,
+        "GNLC",
+        GNLC,
+        "GMC",
+        GMC,
+        "GType",
+        GType,
+        "GRU",
+        GRU,
+        "GRD",
+        GRD,
+        "GSUC",
+        GSUC,
+        "GUT",
+        GUT,
+        "GDT",
+        GDT,
+        "GPIni",
+        GPIni,
+        "hydromap",
+        hydromap,
+        "HPmax",
+        HPmax,
+        "HPmin",
+        HPmin,
+        "HAvail",
+        HAvail,
+        # "HRamp",
+        # HRamp,
+        "renewablemap",
+        renewablemap,
+        "RPmax",
+        RPmax,
+        # "RPmin",
+        # RPmin,
+        "RAvail",
+        RAvail,
+        "UCL",
+        UCL,
+        "EDL",
+        EDL,
+        "EDHAvail",
+        EDHAvail,
+        "EDRAvail",
+        EDRAvail,
+    )
+end
+@info "Reading data took $timereaddata seconds."

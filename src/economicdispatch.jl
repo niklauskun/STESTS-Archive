@@ -17,7 +17,7 @@ function economicdispatch(
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
     RAvail::Matrix{Float64}, # renewable availability
-    U::Matrix{Int}; # Conventional generator status, 1 if on, 0 if off
+    U::Vector{Int64}; # Conventional generator status, 1 if on, 0 if off
     Horizon::Int = 1, # planning horizon
     Steps::Int = 12, # planning steps
     VOLL::Float64 = 9000.0, # value of lost load
@@ -35,12 +35,11 @@ function economicdispatch(
 
     # Define decision variables
     @variable(edmodel, f[1:ntrans, 1:ntimepoints]) # Transmission flow
-    @variable(edmodel, theta[1:nbus, 1:ntimepoints]) # Voltage angle
+    @variable(edmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
     @variable(edmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
     @variable(edmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
     @variable(edmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(edmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
-    @variable(edmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
 
     # Define objective function and constraints
     @objective(
@@ -135,16 +134,16 @@ function economicdispatch(
         ReCap[i = 1:nrenewable, t = 1:Horizon],
         gr[i, t] <= RAvail[i, t]
     )
-    # Ramping limits
+    # Ramping limits, set as one hour ramping limits for initial generation output
     @constraint(
         edmodel,
         RUIni[i = 1:nucgen],
-        guc[i, 1] - GPini[i] <= GRU[i] / Steps
+        guc[i, 1] - GPini[i] <= GRU[i]
     )
     @constraint(
         edmodel,
         RDIni[i = 1:nucgen],
-        GPini[i] - guc[i, 1] <= GRD[i] / Steps
+        GPini[i] - guc[i, 1] <= GRD[i]
     )
     # if EDHorizon > 1
     # @constraint(

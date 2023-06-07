@@ -23,9 +23,10 @@ function unitcommitment(
     GRU::Vector{Float64}, # generator ramp up rate
     GRD::Vector{Float64}, # generator ramp down rate
     GSUC::Vector{Float64}, # generator start-up cost
-    GUT::Vector{Float64}, # generator minimum up time
-    GDT::Vector{Float64}, # generator minimum down time
+    GUT::Vector{Int64}, # generator minimum up time
+    GDT::Vector{Int64}, # generator minimum down time
     GPini::Vector{Float64}, # generator initial output
+    UInput::Vector{Int64}, # Conventional generator status, 1 if on, 0 if off
     hydromap::Matrix{Int64}, # hydro map
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
@@ -46,15 +47,14 @@ function unitcommitment(
 
     # Define decision variables
     @variable(ucmodel, f[1:ntrans, 1:ntimepoints]) # Transmission flow
-    @variable(ucmodel, theta[1:nbus, 1:ntimepoints]) # Voltage angle
+    @variable(ucmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
     @variable(ucmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
     @variable(ucmodel, u[1:nucgen, 1:ntimepoints], Bin) # Conventional generator status, 1 if on, 0 if off
-    @variable(ucmodel, v[1:nucgen, 1:ntimepoints], Bin) # Conventional generator start-up descison, 1 if start-up, 0 otherwise
+    @variable(ucmodel, v[1:nucgen, 1:ntimepoints], Bin) # Conventional generator start-up decision, 1 if start-up, 0 otherwise
     @variable(ucmodel, w[1:nucgen, 1:ntimepoints], Bin) # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
     @variable(ucmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
     @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
-    @variable(ucmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
 
     # Define objective function and constraints
     @objective(
@@ -117,16 +117,6 @@ function unitcommitment(
         )
     )
 
-    # Power flow constraints
-    # @constraint(
-    #     ucmodel,
-    #     PowerFlow[i = 1:ntrans, t = 1:ntimep oints],
-    #     f[i, t] ==
-    #     (transmap[i, 1] - transmap[i, 2]) *
-    #     TX[i] *
-    #     (guc[transmap[i, 1], t] - guc[transmap[i, 2], t])
-    # )
-
     # Conventional generator capacity limits
     @constraint(
         ucmodel,
@@ -150,39 +140,67 @@ function unitcommitment(
         gr[i, h] <= RAvail[i, h]
     )
     # Ramping limits
-    @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])
-    @constraint(ucmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i])
+    # @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])
+    # @constraint(ucmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i])
+    # @constraint(
+    #     ucmodel,
+    #     RU[i = 1:nucgen, h = 1:Horizon-1],
+    #     guc[i, h+1] - guc[i, h] <= GRU[i]
+    # )
+    # @constraint(
+    #     ucmodel,
+    #     RD[i = 1:nucgen, h = 1:Horizon-1],
+    #     guc[i, h] - guc[i, h+1] <= GRD[i]
+    # )
+    @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i] + GPmin[i] * v[i, 1])
+    @constraint(ucmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i] + GPmin[i] * w[i, 1])
     @constraint(
         ucmodel,
         RU[i = 1:nucgen, h = 1:Horizon-1],
-        guc[i, h+1] - guc[i, h] <= GRU[i]
+        guc[i, h+1] - guc[i, h] <= GRU[i] + GPmin[i] * v[i, h+1]
     )
     @constraint(
         ucmodel,
         RD[i = 1:nucgen, h = 1:Horizon-1],
-        guc[i, h] - guc[i, h+1] <= GRD[i]
+        guc[i, h] - guc[i, h+1] <= GRD[i] + GPmin[i] * w[i, h+1]
     )
 
     # State transition constraints
-    # @constraint(ucmodel, U0[i = 1:nucgen], u[i, 1] == u[i, ntimepoints])
-    # Minimum up/down time constraints
     # @constraint(
     #     ucmodel,
-    #     UT[i = 1:nucgen],
-    #     u[i, 1] - U0[i] <= (1 - u[i, t]) * GUT[i]
+    #     ST0[i = 1:nucgen, h = 1:Horizon-1],
+    #     u[i, 1] - UInput[i] == v[i, 1] - w[i, 1]
     # )
-    # if t > 1
-    #     ### Minimum up/down time constraints
-    #     for i in 1:nucgen
-    #         @constraint(
-    #             ucmodel,
-    #             u[i, t] - u[i, t-1] <= (1 - u[i, t]) * GUT[i]
-    #         )
-    #         @constraint(
-    #             ucmodel,
-    #             u[i, t-1] - u[i, t] <= (1 - u[i, t-1]) * GDT[i]
-    #         )
-    #     end
-    # end
+
+    # @constraint(
+    #     ucmodel,
+    #     ST1[i = 1:nucgen, h = 2:Horizon],
+    #     u[i, h] - u[i, h-1] == v[i, h] - w[i, h]
+    # )
+
+    @constraint(
+        ucmodel,
+        ST1[i = 1:nucgen, h = 1:Horizon-1],
+        u[i, h+1] - u[i, h] == v[i, h] - w[i, h]
+    )
+
+    @constraint(
+        ucmodel,
+        ST2[i = 1:nucgen, h = 1:Horizon-1],
+         v[i, h] + w[i, h] <= 1
+    )
+
+    # Minimum up/down time constraints
+    @constraint(
+        ucmodel,
+        UTime[i = 1:nucgen, h = 1:Horizon],
+        sum(v[i, max(1, h-GUT[i]+1):h]) <= u[i, h]
+    )
+    @constraint(
+        ucmodel,
+        DTime[i = 1:nucgen, h = 1:Horizon],
+        sum(w[i, max(1, h-GDT[i]+1):h]) <= 1 - u[i, h]
+    )
+    
     return ucmodel
 end
