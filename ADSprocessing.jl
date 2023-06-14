@@ -93,7 +93,17 @@ timereaddata = @elapsed begin
 #     end
     @assert length(RPmax) == size(renewablemap, 1) == size(RAvail,2) "Renewable data length mismatch."
 
-#     # read demand data
+    # read storage data
+    storagemap = Matrix(CSV.read(joinpath(folder, "StorageMap.csv"), DataFrame)[:,2:end])
+    storagedata = CSV.read(joinpath(folder, "Storage.csv"), DataFrame)
+    EPC = -storagedata[!,:"MinCap(MW)"] # read storage charge capacity, in MW
+    EPD = storagedata[!,:"MaxCap(MW)"] # read storage discharge capacity, in MW
+    Eeta = storagedata[!,:"Efficiency"] # read storage efficiency
+    ESOC = storagedata[!,:"MaxCap(MWh)"] # read storage state of charge capacity, in MWh
+    ESOCini = 0.5 * ESOC # initial state of charge, in MWh
+    @assert length(EPC) == size(storagemap, 1)  "storage data length mismatch."
+
+    # read demand data
     UCL = Matrix(CSV.read(joinpath(folder, "Load.csv"), DataFrame)[:,2:end]) # read demand, in MW
     @assert size(transmap, 2) ==
             size(genmap, 2) ==
@@ -134,6 +144,12 @@ timereaddata = @elapsed begin
     RPmax = convert(Vector{Float64}, RPmax)
     # RPmin = convert(Vector{Float64}, RPmin)
     RAvail = convert(Matrix{Float64}, RAvail)
+    storagemap = convert(Matrix{Int64}, storagemap)
+    EPC = convert(Vector{Float64}, EPC)
+    EPD = convert(Vector{Float64}, EPD)
+    Eeta = convert(Vector{Float64}, Eeta)
+    ESOC = convert(Vector{Float64}, ESOC)
+    ESOCini = convert(Vector{Float64}, ESOCini)
     UCL = convert(Matrix{Float64}, UCL)
 
     EDL = zeros(105408, size(UCL, 2))
@@ -235,6 +251,18 @@ timereaddata = @elapsed begin
         # RPmin,
         "RAvail",
         RAvail,
+        "storagemap",
+        storagemap,
+        "EPC",
+        EPC,
+        "EPD",
+        EPD,
+        "Eeta",
+        Eeta,
+        "ESOC",
+        ESOC,
+        "ESOCini",
+        ESOCini,
         "UCL",
         UCL,
         "EDL",

@@ -30,7 +30,13 @@ function unitcommitment(
     hydromap::Matrix{Int64}, # hydro map
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
-    RAvail::Matrix{Float64}; # renewable availability
+    RAvail::Matrix{Float64}, # renewable availability
+    storagemap::Matrix{Int64}, # storage map
+    EPC::Vector{Float64}, # storage charging capacity
+    EPD::Vector{Float64}, # storage discharging capacity
+    Eeta::Vector{Float64}, # storage efficiency
+    ESOC::Vector{Float64}, # storage state of charge capacity
+    ESOCini::Vector{Float64}; # storage initial state of charge
     Horizon::Int = 24, # planning horizon
     VOLL::Float64 = 9000.0, # value of lost load
     RM::Float64 = 0.2, # reserve margin
@@ -41,6 +47,7 @@ function unitcommitment(
     nucgen = size(genmap, 1) # number of conventional generators
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
+    nstorage = size(storagemap,1) # number of storage units
 
     # Define model
     ucmodel = Model()
@@ -55,12 +62,15 @@ function unitcommitment(
     @variable(ucmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
     @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
+    @variable(ucmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
+    @variable(ucmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
+    @variable(ucmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
 
     # Define objective function and constraints
     @objective(
         ucmodel,
         Min,
-        sum(GMC .* guc + GNLC .* u + GSUC .* v) + sum(VOLL .* s)
+        sum(GMC .* guc + GNLC .* u + GSUC .* v) + sum(50 .* d - 20 .* c) + sum(VOLL .* s)
     )
 
     # Bus wise load balance constraints with transmission
@@ -70,6 +80,8 @@ function unitcommitment(
         sum(genmap[:, z] .* guc[:, h]) +
         sum(hydromap[:, z] .* gh[:, h]) +
         sum(renewablemap[:, z] .* gr[:, h]) +
+        sum(storagemap[:, z] .* d[:, h]) -
+        sum(storagemap[:, z] .* c[:, h]) +
         sum(transmap[:, z] .* f[:, h]) +
         s[z, h] == UCL[z, h]
     )
@@ -82,7 +94,7 @@ function unitcommitment(
     #     sum(UCL[:, h])
     # )
 
-    # # System reserve constraints
+    # System reserve constraints
     # @constraint(
     #     ucmodel,
     #     Reserve[h = 1:ntimepoints],
@@ -115,6 +127,39 @@ function unitcommitment(
             θ[(findfirst(x -> x == 1, transmap[l, :])), h] -
             θ[(findfirst(x -> x == -1, transmap[l, :])), h]
         )
+    )
+
+    # Storage charge and discharge constraints
+    @constraint(
+        ucmodel,
+        StorageCharge[i = 1:nstorage, h = 1:ntimepoints],
+        c[i, h] <= EPC[i]
+    )
+
+    @constraint(
+        ucmodel,
+        StorageDischarge[i = 1:nstorage, h = 1:ntimepoints],
+        d[i, h] <= EPD[i]
+    )
+
+    # Storage energy level constraints
+    @constraint(
+        ucmodel,
+        StorageSOCCap[i = 1:nstorage, h = 1:ntimepoints],
+        e[i, h] <= ESOC[i]
+    )
+
+    # Storage SOC evolution constraints
+    @constraint(
+        ucmodel,
+        StorageSOCIni[i = 1:nstorage],
+        e[i, 1] == ESOCini[i] + c[i, 1] * Eeta[i] - d[i, 1] / Eeta[i]
+    )
+
+    @constraint(
+        ucmodel,
+        StorageSOC[i = 1:nstorage, h = 2:ntimepoints],
+        e[i, h] == e[i, h-1] + c[i, h] * Eeta[i] - d[i, h] / Eeta[i]
     )
 
     # Conventional generator capacity limits
@@ -166,29 +211,29 @@ function unitcommitment(
     )
 
     # State transition constraints
-    # @constraint(
-    #     ucmodel,
-    #     ST0[i = 1:nucgen, h = 1:Horizon-1],
-    #     u[i, 1] - UInput[i] == v[i, 1] - w[i, 1]
-    # )
-
-    # @constraint(
-    #     ucmodel,
-    #     ST1[i = 1:nucgen, h = 2:Horizon],
-    #     u[i, h] - u[i, h-1] == v[i, h] - w[i, h]
-    # )
-
     @constraint(
         ucmodel,
-        ST1[i = 1:nucgen, h = 1:Horizon-1],
-        u[i, h+1] - u[i, h] == v[i, h] - w[i, h]
+        ST0[i = 1:nucgen],
+        u[i, 1] - UInput[i] == v[i, 1] - w[i, 1]
     )
 
     @constraint(
         ucmodel,
-        ST2[i = 1:nucgen, h = 1:Horizon-1],
-         v[i, h] + w[i, h] <= 1
+        ST1[i = 1:nucgen, h = 2:Horizon],
+        u[i, h] - u[i, h-1] == v[i, h] - w[i, h]
     )
+
+    # @constraint(
+    #     ucmodel,
+    #     ST1[i = 1:nucgen, h = 1:Horizon-1],
+    #     u[i, h+1] - u[i, h] == v[i, h] - w[i, h]
+    # )
+
+    # @constraint(
+    #     ucmodel,
+    #     ST2[i = 1:nucgen, h = 1:Horizon-1],
+    #      v[i, h] + w[i, h] <= 1
+    # )
 
     # Minimum up/down time constraints
     @constraint(

@@ -20,6 +20,12 @@ hydromap, # map of hydro units
 HAvail, # availability of hydro units
 renewablemap, # map of renewable units
 RAvail,
+storagemap,
+EPC,
+EPD,
+Eeta,
+ESOC,
+ESOCini,
 EDL,
 EDHAvail,
 EDRAvail = STESTS.read_jld2("./data/ADS2032.jld2")
@@ -65,8 +71,14 @@ ucmodel = STESTS.unitcommitment(
     UCHAvailInput,
     renewablemap,
     UCRAvailInput,
+    storagemap,
+    EPC,
+    EPD,
+    Eeta,
+    ESOC,
+    ESOCini,
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-    VOLL = 9000.0, # value of lost load, $/MWh
+    VOLL = 1000.0, # value of lost load, $/MWh
     RM = 0.2, # reserve margin, 20%
 )
 
@@ -97,9 +109,15 @@ edmodel = STESTS.economicdispatch(
     renewablemap,
     EDRAvailInput,
     UInput,
+    storagemap,
+    EPC,
+    EPD,
+    Eeta,
+    ESOC,
+    ESOCini,
     Horizon = EDHorizon,
     Steps = EDSteps, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-    VOLL = 9000.0, # value of lost load, $/MWh
+    VOLL = 1000.0, # value of lost load, $/MWh
 )
 
 # Edit economic dispatch model here
@@ -133,7 +151,7 @@ timesolve = @elapsed begin
         UCHorizon = UCHorizon,
         EDHorizon = EDHorizon,
         EDSteps = EDSteps,
-        VOLL = 9000.0,
+        VOLL = 1000.0,
     )
     end
 @info "Solving took $timesolve seconds."

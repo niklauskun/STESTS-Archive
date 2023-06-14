@@ -17,7 +17,13 @@ function economicdispatch(
     HAvail::Matrix{Float64}, # hydro availability
     renewablemap::Matrix{Int64}, # renewable map
     RAvail::Matrix{Float64}, # renewable availability
-    U::Vector{Int64}; # Conventional generator status, 1 if on, 0 if off
+    U::Vector{Int64}, # Conventional generator status, 1 if on, 0 if off
+    storagemap::Matrix{Int64}, # storage map
+    EPC::Vector{Float64}, # storage charging capacity
+    EPD::Vector{Float64}, # storage discharging capacity
+    Eeta::Vector{Float64}, # storage efficiency
+    ESOC::Vector{Float64}, # storage state of charge capacity
+    ESOCini::Vector{Float64}; # storage initial state of charge
     Horizon::Int = 1, # planning horizon
     Steps::Int = 12, # planning steps
     VOLL::Float64 = 9000.0, # value of lost load
@@ -29,6 +35,7 @@ function economicdispatch(
     nucgen = size(genmap, 1) # number of conventional generators
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
+    nstorage = size(storagemap,1) # number of storage units
 
     # Define model
     edmodel = Model()
@@ -40,6 +47,9 @@ function economicdispatch(
     @variable(edmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
     @variable(edmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(edmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
+    @variable(edmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
+    @variable(edmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
+    @variable(edmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
 
     # Define objective function and constraints
     @objective(
@@ -56,6 +66,8 @@ function economicdispatch(
         sum(genmap[:, z] .* guc[:, t]) +
         sum(hydromap[:, z] .* gh[:, t]) +
         sum(renewablemap[:, z] .* gr[:, t]) +
+        sum(storagemap[:, z] .* d[:, t]) -
+        sum(storagemap[:, z] .* c[:, t]) +
         sum(transmap[:, z] .* f[:, t]) +
         s[z, t] == EDL[z, t]
     )
@@ -111,6 +123,40 @@ function economicdispatch(
     #     TX[i] *
     #     (guc[transmap[i, 1], t] - guc[transmap[i, 2], t])
     # )
+
+    # Storage charge and discharge constraints
+    @constraint(
+        edmodel,
+        StorageCharge[i = 1:nstorage, t = 1:ntimepoints],
+        c[i, t] <= EPC[i]
+    )
+
+    @constraint(
+        edmodel,
+        StorageDischarge[i = 1:nstorage, t = 1:ntimepoints],
+        d[i, t] <= EPD[i]
+    )
+
+    # Storage energy level constraints
+    @constraint(
+        edmodel,
+        StorageSOCCap[i = 1:nstorage, t = 1:ntimepoints],
+        e[i, t] <= ESOC[i]
+    )
+
+    # Storage SOC evolution constraints
+    @constraint(
+        edmodel,
+        StorageSOCIni[i = 1:nstorage],
+        e[i, 1] == ESOCini[i] + c[i, 1] * Eeta[i] / Steps - d[i, 1] / Eeta[i] / Steps
+    )
+
+    @constraint(
+        edmodel,
+        StorageSOC[i = 1:nstorage, t = 2:ntimepoints],
+        e[i, t] == e[i, t-1] + c[i, t] * Eeta[i] / Steps - d[i, t] / Eeta[i] / Steps
+    )
+
 
     # Conventional generator capacity limits
     @constraint(

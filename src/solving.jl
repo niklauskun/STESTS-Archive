@@ -57,12 +57,15 @@ function solving(
             U = value.(ucmodel[:u])
             V = value.(ucmodel[:v])
             W = value.(ucmodel[:w])
+            S = value.(ucmodel[:s])
             Udf = DataFrame(U' , :auto)
             Vdf = DataFrame(V' , :auto)
             Wdf = DataFrame(W' , :auto)
+            Sdf = DataFrame(S' , :auto)
             CSV.write("output/UCCommit.csv", Udf, append = true)
             CSV.write("output/UCStart.csv", Vdf, append = true)
             CSV.write("output/UCShut.csv", Wdf, append = true)
+            CSV.write("output/UCSlack.csv", Sdf, append = true)
             UCGdf = DataFrame(value.(ucmodel[:guc])' , :auto)
             CSV.write("output/UCGen.csv", UCGdf, append = true)
             # Update parameters in unit commitment model
@@ -83,8 +86,8 @@ function solving(
             EDV = zeros(size(V,1), size(V,2) * EDSteps)
             EDW = zeros(size(V,1), size(V,2) * EDSteps)
             for i in axes(V, 2)
-                EDV[:, (i-1)*12+1] = V[:, i]
-                EDW[:, (i-1)*12+1] = W[:, i]
+                EDV[:, (i-1)*EDSteps+1] = V[:, i]
+                EDW[:, (i-1)*EDSteps+1] = W[:, i]
             end
 
             for h in 1:UCHorizon
@@ -94,7 +97,8 @@ function solving(
                     @objective(
                         edmodel,
                         Min,
-                        sum(GMC .* edmodel[:guc] + GNLC .* U[:,h] + GSUC .* EDV[:,(h - 1) * EDSteps + t]) / EDSteps +
+                        sum(GMC .* edmodel[:guc] / EDSteps + GNLC .* U[:,h] / EDSteps + GSUC .* EDV[:,(h - 1) * EDSteps + t]) +
+                        sum(50 .* edmodel[:d] - 20 .* edmodel[:c])/EDSteps +
                         sum(VOLL .* edmodel[:s]) / EDSteps
                     )
                     EDLInput = convert(Matrix{Float64}, EDL[ts:ts+EDHorizon-1, :]')
@@ -105,10 +109,10 @@ function solving(
                         # if ts ==1 && tp == 1
                         if (h - 1) * EDSteps + t == 1
                             for i in axes(GPini, 1)
-                                # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i] + (GPmin[i] + GRD[i])*EDV[i,(h - 1) * EDSteps + t])
-                                # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i] + (GPmin[i] + GRD[i])*EDW[i,(h - 1) * EDSteps + t])
-                                set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
-                                set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
+                                set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i] + (GPmin[i])*EDV[i,(h - 1) * EDSteps + t])
+                                set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i] + (GPmin[i])*EDW[i,(h - 1) * EDSteps + t])
+                                # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
+                                # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
                             end
                         end
                         for z in axes(EDLInput, 1)
@@ -133,15 +137,26 @@ function solving(
                         EDGPini = value.(edmodel[:guc])[:,1]
                         EDGdf = DataFrame(EDGPini' , :auto)
                         CSV.write("output/EDGen.csv", EDGdf, append = true)
+                        EDSOCini = value.(edmodel[:e])[:,1]
+                        EDSOCinidf = DataFrame(EDSOCini' , :auto)
+                        CSV.write("output/EDSOCini.csv", EDSOCinidf, append = true)
+                        EDS = value.(edmodel[:s])
+                        EDSdf = DataFrame(EDS' , :auto)
+                        CSV.write("output/EDSlack.csv", EDSdf, append = true)
                         EDprice = dual.(edmodel[:LoadBalance])
                         EDpricedf = DataFrame(EDprice' , :auto)
                         CSV.write("output/EDprice.csv", EDpricedf, append = true)
                         # Update initial generation output for next time step
                         for i in axes(GPini, 1)
-                            # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i]/EDSteps + (GPmin[i] + GRD[i])*EDV[i,(h - 1) * EDSteps + t + 1])
-                            # set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i]/EDSteps + (GPmin[i] + GRD[i])*EDW[i,(h - 1) * EDSteps + t + 1])
-                            set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i]/EDSteps)
-                            set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i]/EDSteps)
+                            if (h - 1) * EDSteps + t != UCHorizon * EDSteps
+                                set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i]/EDSteps + (GPmin[i] + GRD[i] - GRU[i]/EDSteps)*EDV[i,(h - 1) * EDSteps + t + 1])
+                                set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i]/EDSteps + (EDGPini[i] - GRD[i]/EDSteps)*EDW[i,(h - 1) * EDSteps + t + 1])
+                                # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i] + GPmin[i]*EDV[i,(h - 1) * EDSteps + t + 1])
+                                # set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i] + GPmin[i]*EDW[i,(h - 1) * EDSteps + t + 1])
+                            end
+                        end
+                        for i in axes(EDSOCini, 1)
+                            set_normalized_rhs(edmodel[:StorageSOCIni][i], EDSOCini[i])
                         end
                     else
                         error("No optimal solution found for ED at hour $h step $t.")
