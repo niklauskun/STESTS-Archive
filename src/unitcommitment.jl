@@ -38,8 +38,8 @@ function unitcommitment(
     ESOC::Vector{Float64}, # storage state of charge capacity
     ESOCini::Vector{Float64}; # storage initial state of charge
     Horizon::Int = 24, # planning horizon
-    VOLL::Float64 = 9000.0, # value of lost load
-    RM::Float64 = 0.2, # reserve margin
+    VOLL::Float64 = 1000.0, # value of lost load
+    RM::Float64 = 0.03, # reserve margin
 )::JuMP.Model
     ntimepoints = Horizon # number of time points
     nbus = size(UCL, 1) # number of buses
@@ -47,7 +47,7 @@ function unitcommitment(
     nucgen = size(genmap, 1) # number of conventional generators
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
-    nstorage = size(storagemap,1) # number of storage units
+    nstorage = size(storagemap, 1) # number of storage units
 
     # Define model
     ucmodel = Model()
@@ -65,12 +65,15 @@ function unitcommitment(
     @variable(ucmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
     @variable(ucmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
     @variable(ucmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
+    @variable(ucmodel, grr[1:nucgen, 1:ntimepoints] >= 0) # Conventional generator reserve
 
     # Define objective function and constraints
     @objective(
         ucmodel,
         Min,
-        sum(GMC .* guc + GNLC .* u + GSUC .* v) + sum(50 .* d - 20 .* c) + sum(VOLL .* s)
+        sum(GMC .* guc + GNLC .* u + GSUC .* v) +
+        sum(50 .* d - 20 .* c) +
+        sum(VOLL .* s)
     )
 
     # Bus wise load balance constraints with transmission
@@ -80,8 +83,7 @@ function unitcommitment(
         sum(genmap[:, z] .* guc[:, h]) +
         sum(hydromap[:, z] .* gh[:, h]) +
         sum(renewablemap[:, z] .* gr[:, h]) +
-        sum(storagemap[:, z] .* d[:, h]) -
-        sum(storagemap[:, z] .* c[:, h]) +
+        sum(storagemap[:, z] .* d[:, h]) - sum(storagemap[:, z] .* c[:, h]) +
         sum(transmap[:, z] .* f[:, h]) +
         s[z, h] == UCL[z, h]
     )
@@ -95,14 +97,25 @@ function unitcommitment(
     # )
 
     # System reserve constraints
-    # @constraint(
-    #     ucmodel,
-    #     Reserve[h = 1:ntimepoints],
-    #     sum(guc[:, h]) + 
-    #     sum(GRU .* u[:,h]) +
-    #     sum(HAvail[:, h]) +
-    #     sum(RAvail[:, h]) >= (1 + RM) * sum(UCL[:, h])
-    # )
+    @constraint(
+        ucmodel,
+        UnitReserve1[i = 1:nucgen, h = 1:ntimepoints],
+        grr[i, h] <= GPmax[i] - guc[i, h]
+    )
+
+    @constraint(
+        ucmodel,
+        UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
+        grr[i, h] <= u[i, h] * GRU[i]
+    )
+
+    @constraint(
+        ucmodel,
+        Reserve[h = 1:ntimepoints],
+        sum(guc[:, h]) + sum(grr[:, h]) + sum(d[:, h]) - sum(c[:, h]) +
+        sum(HAvail[:, h]) +
+        sum(RAvail[:, h]) >= sum(UCL[:, h]) + RM * maximum(sum(UCL, dims = 2))
+    )
 
     # # Transmission capacity limits
     @constraint(
@@ -197,8 +210,16 @@ function unitcommitment(
     #     RD[i = 1:nucgen, h = 1:Horizon-1],
     #     guc[i, h] - guc[i, h+1] <= GRD[i]
     # )
-    @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i] + GPmin[i] * v[i, 1])
-    @constraint(ucmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i] + GPmin[i] * w[i, 1])
+    @constraint(
+        ucmodel,
+        RUIni[i = 1:nucgen],
+        guc[i, 1] - GPini[i] <= GRU[i] + GPmin[i] * v[i, 1]
+    )
+    @constraint(
+        ucmodel,
+        RDIni[i = 1:nucgen],
+        GPini[i] - guc[i, 1] <= GRD[i] + GPmin[i] * w[i, 1]
+    )
     @constraint(
         ucmodel,
         RU[i = 1:nucgen, h = 1:Horizon-1],
@@ -239,13 +260,13 @@ function unitcommitment(
     @constraint(
         ucmodel,
         UTime[i = 1:nucgen, h = 1:Horizon],
-        sum(v[i, max(1, h-GUT[i]+1):h]) <= u[i, h]
+        sum(v[i, max(1, h - GUT[i] + 1):h]) <= u[i, h]
     )
     @constraint(
         ucmodel,
         DTime[i = 1:nucgen, h = 1:Horizon],
-        sum(w[i, max(1, h-GDT[i]+1):h]) <= 1 - u[i, h]
+        sum(w[i, max(1, h - GDT[i] + 1):h]) <= 1 - u[i, h]
     )
-    
+
     return ucmodel
 end

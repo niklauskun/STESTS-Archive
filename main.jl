@@ -47,7 +47,7 @@ UCRAvailInput = convert(Matrix{Float64}, RAvail[1:UCHorizon, :]')
 EDLInput = convert(Matrix{Float64}, EDL[1:EDHorizon, :]')
 EDHAvailInput = convert(Matrix{Float64}, EDHAvail[1:EDHorizon, :]')
 EDRAvailInput = convert(Matrix{Float64}, EDRAvail[1:EDHorizon, :]')
-UInput = convert(Array{Int64, 1}, GPini .!= 0) # initial status of generators, 1 if on, 0 if off
+UInput = convert(Array{Int64,1}, GPini .!= 0) # initial status of generators, 1 if on, 0 if off
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
@@ -79,7 +79,7 @@ ucmodel = STESTS.unitcommitment(
     ESOCini,
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
     VOLL = 1000.0, # value of lost load, $/MWh
-    RM = 0.2, # reserve margin, 20%
+    RM = 0.03, # reserve margin, 6% of peak load
 )
 
 # Edit unit commitment model here
@@ -153,7 +153,7 @@ timesolve = @elapsed begin
         EDSteps = EDSteps,
         VOLL = 1000.0,
     )
-    end
+end
 @info "Solving took $timesolve seconds."
 # STESTS.solving(
 #     1,
@@ -165,7 +165,6 @@ timesolve = @elapsed begin
 #     EDSteps = EDSteps,
 #     EDHorizon = EDHorizon,
 # )
-
 
 CSV.write("output/UCgentotal.csv", DataFrame(UCgen, :auto))
 CSV.write("output/UCnetgentotal.csv", DataFrame(UCnetgen, :auto))
