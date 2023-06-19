@@ -51,11 +51,12 @@ function economicdispatch(
     @variable(edmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
     @variable(edmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
 
-    # Define objective function and constraints
+    # Define objective function and constraints， no-load and start-up cost will be added later
     @objective(
         edmodel,
         Min,
-        sum(GMC .* guc + GNLC .* U) / Steps +
+        sum(GMC .* guc) / Steps +
+        sum(50 .* d - 20 .* c) / Steps +
         sum(VOLL .* s) / Steps
     )
 

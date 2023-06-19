@@ -100,21 +100,19 @@ function unitcommitment(
     @constraint(
         ucmodel,
         UnitReserve1[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= GPmax[i] - guc[i, h]
+        grr[i, h] <= GPmax[i] * u[i, h] - guc[i, h]
     )
 
     @constraint(
         ucmodel,
         UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= u[i, h] * GRU[i]
+        grr[i, h] <=  GRU[i]
     )
 
     @constraint(
         ucmodel,
         Reserve[h = 1:ntimepoints],
-        sum(guc[:, h]) + sum(grr[:, h]) + sum(d[:, h]) - sum(c[:, h]) +
-        sum(HAvail[:, h]) +
-        sum(RAvail[:, h]) >= sum(UCL[:, h]) + RM * maximum(sum(UCL, dims = 2))
+        sum(grr[:, h]) >= RM * maximum(sum(UCL, dims = 2))
     )
 
     # # Transmission capacity limits

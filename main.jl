@@ -30,7 +30,7 @@ EDL,
 EDHAvail,
 EDRAvail = STESTS.read_jld2("./data/ADS2032.jld2")
 
-UCHorizon = Int(24) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
+UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 # NDay = Int(size(UCL, 1) / UCHorizon)
 NDay = 1
 EDSteps = Int(12) # number of 5-min intervals in a hour
@@ -38,7 +38,7 @@ EDSteps = Int(12) # number of 5-min intervals in a hour
 # EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
 #   # load for economic dispatch, MW, repeat by ED steps w/o noise
 # EDRAvail = repeat(RAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
-EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
+EDHorizon = Int(10) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
 #select first UCHorizon rows of UCL as initial input to unit commitment model
 UCLInput = convert(Matrix{Float64}, UCL[1:UCHorizon, :]')
 UCHAvailInput = convert(Matrix{Float64}, HAvail[1:UCHorizon, :]')
@@ -155,16 +155,6 @@ timesolve = @elapsed begin
     )
 end
 @info "Solving took $timesolve seconds."
-# STESTS.solving(
-#     1,
-#     UCL,
-#     EDL,
-#     ucmodel,
-#     edmodel,
-#     UCHorizon = UCHorizon,
-#     EDSteps = EDSteps,
-#     EDHorizon = EDHorizon,
-# )
 
 CSV.write("output/UCgentotal.csv", DataFrame(UCgen, :auto))
 CSV.write("output/UCnetgentotal.csv", DataFrame(UCnetgen, :auto))
