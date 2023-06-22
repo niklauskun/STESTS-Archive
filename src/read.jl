@@ -22,6 +22,8 @@ function read_jld2(filename::String)
         GPmax = data["GPmax"],
         GPmin = data["GPmin"],
         GMC = data["GMC"],
+        GSMC = data["GSMC"],
+        GINCPmax = data["GINCPmax"],
         transmap = data["transmap"],
         TX = data["TX"],
         TFmax = data["TFmax"],

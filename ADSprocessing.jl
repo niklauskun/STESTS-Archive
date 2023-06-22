@@ -21,7 +21,9 @@ timereaddata = @elapsed begin
     GPmax = gendata[!,:"IOMaxCap(MW)"] # read generator maximum capacity, in MW
     GPmin = gendata[!,:"IOMinCap(MW)"] # read generator minimum capacity, in MW
     GNLC = gendata[!,:"NoLoadCost(\$)"] # read generator non-load cost, in $
-    GMC = gendata[!,:"IncCost2(\$/MW)"] # read generator marginal cost, in $/MW
+    GMC = gendata[!,:"VOM Cost"] # read generator VOM cost, in $/MW
+    GSMC = Matrix(gendata[:,22:26]) # read generator segment marginal cost, in $/MW
+    GINCPmax = Matrix(gendata[:,5:9]) # read generator segment maximum capacity, in MW
     GType = gendata[!,:"SubType"] # read generator type
     GRU = gendata[!,:"RampUp Rate(MW/minute)"] * 60 # read generator ramp up rate, in MW/hour
     GRD = gendata[!,:"RampDn Rate(MW/minute)"] * 60 # read generator ramp down rate, in MW/hour
@@ -40,6 +42,8 @@ timereaddata = @elapsed begin
             length(GUT) ==
             length(GDT) ==
             length(GPIni) ==
+            size(GSMC, 1) ==
+            size(GINCPmax, 1) ==
             size(genmap, 1) "Generator data length mismatch."
 
     # read hydro data
@@ -128,6 +132,8 @@ timereaddata = @elapsed begin
     GPmin = convert(Vector{Float64}, GPmin)
     GNLC = convert(Vector{Float64}, GNLC)
     GMC = convert(Vector{Float64}, GMC)
+    GSMC = convert(Matrix{Float64}, GSMC)
+    GINCPmax = convert(Matrix{Float64}, GINCPmax)
     GType = convert(Vector{String}, GType)
     GRU = convert(Vector{Float64}, GRU)
     GRD = convert(Vector{Float64}, GRD)
@@ -219,6 +225,10 @@ timereaddata = @elapsed begin
         GNLC,
         "GMC",
         GMC,
+        "GSMC",
+        GSMC,
+        "GINCPmax",
+        GINCPmax,
         "GType",
         GType,
         "GRU",

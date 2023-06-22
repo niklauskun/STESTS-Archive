@@ -6,6 +6,8 @@ genmap, # map of generators
 GPmax, # maximum power output of generators
 GPmin, # minimum power output of generators
 GMC, # marginal cost of generators
+GSMC, # segment marginal cost of generators
+GINCPmax, # maximum power output of generator segments
 transmap, # map of transmission lines
 TX, # reactance of transmission lines
 TFmax, # maximum power flow of transmission lines
@@ -30,15 +32,16 @@ EDL,
 EDHAvail,
 EDRAvail = STESTS.read_jld2("./data/ADS2032.jld2")
 
-UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
+UCHorizon = Int(24) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 # NDay = Int(size(UCL, 1) / UCHorizon)
 NDay = 1
 EDSteps = Int(12) # number of 5-min intervals in a hour
-
 # EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
 #   # load for economic dispatch, MW, repeat by ED steps w/o noise
 # EDRAvail = repeat(RAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
-EDHorizon = Int(10) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
+EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
+EDGSMC = repeat(GSMC, outer = (1,1,EDHorizon)) # segment marginal cost of generators, repeat by UCHorizon
+GSMC = repeat(GSMC, outer = (1,1,UCHorizon)) # segment marginal cost of generators, repeat by UCHorizon
 #select first UCHorizon rows of UCL as initial input to unit commitment model
 UCLInput = convert(Matrix{Float64}, UCL[1:UCHorizon, :]')
 UCHAvailInput = convert(Matrix{Float64}, HAvail[1:UCHorizon, :]')
@@ -56,6 +59,8 @@ ucmodel = STESTS.unitcommitment(
     GPmax,
     GPmin,
     GMC,
+    GSMC,
+    GINCPmax,
     transmap,
     TX,
     TFmax,
@@ -97,6 +102,8 @@ edmodel = STESTS.economicdispatch(
     GPmax,
     GPmin,
     GMC,
+    EDGSMC,
+    GINCPmax,
     transmap,
     TX,
     TFmax,
@@ -141,6 +148,7 @@ timesolve = @elapsed begin
         GPmin,
         GPini,
         GMC,
+        GSMC,
         GNLC,
         GSUC,
         EDL,

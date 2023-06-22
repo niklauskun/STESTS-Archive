@@ -12,6 +12,7 @@ function solving(
     GPmin::Vector{Float64},
     GPini::Vector{Float64},
     GMC::Vector{Float64},
+    GSMC::Array{Float64,3},
     GNLC::Vector{Float64},
     GSUC::Vector{Float64},
     EDL::Matrix{Float64},
@@ -26,12 +27,14 @@ function solving(
 )
     UCcost = Array{Float64}(undef, Nday)
     GMCcost = Array{Float64}(undef, Nday)
+    GSMCcost = Array{Float64}(undef, Nday)
     VOLLcost = Array{Float64}(undef, Nday)
     EScost = Array{Float64}(undef, Nday)
     UCnetgen = Array{Float64}(undef, Nday, UCHorizon)
     UCgen = Array{Float64}(undef, Nday, UCHorizon)
     EDcost = Array{Float64}(undef, Nday * UCHorizon * EDSteps)
     EDGMCcost = Array{Float64}(undef, Nday * UCHorizon * EDSteps)
+    EDGSMCcost = Array{Float64}(undef, Nday * UCHorizon * EDSteps)
     EDVOLL = Array{Float64}(undef, Nday * UCHorizon * EDSteps)
     EDEScost = Array{Float64}(undef, Nday * UCHorizon * EDSteps)
 
@@ -61,9 +64,11 @@ function solving(
         # Extract solution and solve economic dispatch model
         if termination_status(ucmodel) == MOI.OPTIMAL
             GMCcost[d] = sum(value.(ucmodel[:guc])[:,1:24] .* GMC)
+            GSMCcost[d] = sum(value.(ucmodel[:gucs])[:,:,1:24] .* GSMC[:,:,1:24])
             VOLLcost[d] = sum(value.(ucmodel[:s])[1:24] .* VOLL)
             EScost[d] = sum(value.(ucmodel[:d])[:,1:24] .* 50 - value.(ucmodel[:c])[:,1:24] .* 20)
-            UCcost[d] = GMCcost[d] + VOLLcost[d] + EScost[d] + sum(value.(ucmodel[:u])[:,1:24] .* GNLC + value.(ucmodel[:v])[:,1:24] .* GSUC)
+            UCcost[d] = GMCcost[d] + GSMCcost[d] + VOLLcost[d] + EScost[d] + sum(value.(ucmodel[:u])[:,1:24] .* GNLC + value.(ucmodel[:v])[:,1:24] .* GSUC)
+            # UCcost[d] = objective_value(ucmodel)
             UCnetgen[d, :] = sum(value.(ucmodel[:guc]), dims = 1)[:]
             UCgen[d, :] =
                 sum(value.(ucmodel[:guc]), dims = 1)[:] +
@@ -140,6 +145,10 @@ function solving(
                                 edmodel[:UCCapL][i, tp],
                                 EDU[i, (h-1)*EDSteps + t + tp - 1] * GPmin[i],
                             )
+                            set_normalized_rhs(
+                                edmodel[:UCGenSeg1][i, tp],
+                                EDU[i, (h-1)*EDSteps + t + tp - 1] * GPmin[i],
+                            )
                         end
                         for i in axes(EDHAvailInput, 1)
                             set_normalized_rhs(
@@ -159,9 +168,10 @@ function solving(
                     # # Extract solution
                     if termination_status(edmodel) == MOI.OPTIMAL
                         EDGMCcost[ts] = sum(value.(edmodel[:guc])[:, 1] .* GMC)/EDSteps
+                        EDGSMCcost[ts] = sum(value.(edmodel[:gucs])[:,:,1] .* GSMC[:,:,1])/EDSteps
                         EDVOLL[ts] = sum(value.(edmodel[:s])[:, 1] .* VOLL)/EDSteps
                         EDEScost[ts] = sum(value.(edmodel[:d])[:, 1] .* 50 - value.(edmodel[:c])[:, 1] .* 20)/EDSteps
-                        EDcost[ts] = EDGMCcost[ts] + EDVOLL[ts] + EDEScost[ts] + sum(EDU[:,(h-1)*EDSteps+t] .* GNLC / EDSteps + EDV[:,(h-1)*EDSteps+t] .* GSUC)
+                        EDcost[ts] = EDGMCcost[ts] + EDGSMCcost[ts] + EDVOLL[ts] + EDEScost[ts] + sum(EDU[:,(h-1)*EDSteps+t] .* GNLC / EDSteps + EDV[:,(h-1)*EDSteps+t] .* GSUC)
                         EDGPini = value.(edmodel[:guc])[:, 1]
                         EDGdf = DataFrame(EDGPini', :auto)
                         CSV.write("output/EDGen.csv", EDGdf, append = true)
@@ -175,7 +185,7 @@ function solving(
                         EDS = value.(edmodel[:s])
                         EDSdf = DataFrame(EDS', :auto)
                         CSV.write("output/EDSlack.csv", EDSdf, append = true)
-                        EDprice = dual.(edmodel[:LoadBalance])
+                        EDprice = dual.(edmodel[:LoadBalance])[:,1]
                         EDpricedf = DataFrame(EDprice', :auto)
                         CSV.write(
                             "output/EDprice.csv",
@@ -189,14 +199,14 @@ function solving(
                                     edmodel[:RUIni][i],
                                     EDGPini[i] + 
                                     GRU[i] / EDSteps +
-                                    (GPmin[i] + GRD[i] - GRU[i] / EDSteps) *
+                                    (GPmin[i]) *
                                     EDV[i, (h-1)*EDSteps+t+1],
                                 )
                                 set_normalized_rhs(
                                     edmodel[:RDIni][i],
                                     -EDGPini[i] +
                                     GRD[i] / EDSteps +
-                                    (EDGPini[i] - GRD[i] / EDSteps) *
+                                    (GPmin[i]) *
                                     EDW[i, (h-1)*EDSteps+t+1],
                                 )
                                 # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i] + GPmin[i]*EDV[i,(h - 1) * EDSteps + t + 1])

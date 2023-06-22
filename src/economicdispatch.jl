@@ -6,6 +6,8 @@ function economicdispatch(
     GPmax::Vector{Float64}, # generator maximum output
     GPmin::Vector{Float64}, # generator minimum output
     GMC::Vector{Float64}, # generator marginal cost
+    GSMC::Array{Float64,3}, # generator segment marginal cost
+    GINCPmax::Matrix{Float64}, # maximum power output of generator segments
     transmap::Matrix{Int64}, # transmission map
     TX::Vector{Float64}, # transmission reactance
     TFmax::Vector{Float64}, # transmission maximum flow,
@@ -33,6 +35,7 @@ function economicdispatch(
     nbus = size(EDL, 1) # number of buses
     ntrans = size(transmap, 1) # number of transmission lines
     nucgen = size(genmap, 1) # number of conventional generators
+    ngucs = size(GSMC, 2) # number of generator segments
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
     nstorage = size(storagemap,1) # number of storage units
@@ -50,12 +53,14 @@ function economicdispatch(
     @variable(edmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
     @variable(edmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
     @variable(edmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
+    @variable(edmodel, gucs[1:nucgen, 1:ngucs, 1:ntimepoints] >= 0) # Conventional generator segment output
 
     # Define objective function and constraints， no-load and start-up cost will be added later
     @objective(
         edmodel,
         Min,
         sum(GMC .* guc) / Steps +
+        sum(GSMC .* gucs)/ Steps +
         sum(50 .* d - 20 .* c) / Steps +
         sum(VOLL .* s) / Steps
     )
@@ -158,6 +163,18 @@ function economicdispatch(
         e[i, t] == e[i, t-1] + c[i, t] * Eeta[i] / Steps - d[i, t] / Eeta[i] / Steps
     )
 
+    # Conventional generator segment constraints
+    @constraint(
+        edmodel,
+        UCGenSeg1[i = 1:nucgen, t = 1:ntimepoints],
+        guc[i, t] == U[i] * GPmin[i] + sum(gucs[i,:,t])
+    )
+
+    @constraint(
+        edmodel,
+        UCGenSeg2[i = 1:nucgen, j = 1:ngucs, t = 1:ntimepoints],
+        gucs[i, j, t] <= GINCPmax[i, j]
+    )
 
     # Conventional generator capacity limits
     @constraint(
