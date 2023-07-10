@@ -32,14 +32,14 @@ EDL,
 EDHAvail,
 EDRAvail = STESTS.read_jld2("./data/ADS2032.jld2")
 
-UCHorizon = Int(24) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
+UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 # NDay = Int(size(UCL, 1) / UCHorizon)
 NDay = 1
 EDSteps = Int(12) # number of 5-min intervals in a hour
 # EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
 #   # load for economic dispatch, MW, repeat by ED steps w/o noise
 # EDRAvail = repeat(RAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
-EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
+EDHorizon = Int(10) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
 EDGSMC = repeat(GSMC, outer = (1,1,EDHorizon)) # segment marginal cost of generators, repeat by UCHorizon
 GSMC = repeat(GSMC, outer = (1,1,UCHorizon)) # segment marginal cost of generators, repeat by UCHorizon
 #select first UCHorizon rows of UCL as initial input to unit commitment model
@@ -50,7 +50,8 @@ UCRAvailInput = convert(Matrix{Float64}, RAvail[1:UCHorizon, :]')
 EDLInput = convert(Matrix{Float64}, EDL[1:EDHorizon, :]')
 EDHAvailInput = convert(Matrix{Float64}, EDHAvail[1:EDHorizon, :]')
 EDRAvailInput = convert(Matrix{Float64}, EDRAvail[1:EDHorizon, :]')
-UInput = convert(Array{Int64,1}, GPini .!= 0) # initial status of generators, 1 if on, 0 if off
+# UInput = convert(Array{Int64,1}, GPini .!= 0) # initial status of generators, 1 if on, 0 if off
+UInput = ones(Int, size(GPini,1)) # initial status of generators, 1 if on, 0 if off
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
@@ -84,7 +85,7 @@ ucmodel = STESTS.unitcommitment(
     ESOCini,
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
     VOLL = 1000.0, # value of lost load, $/MWh
-    RM = 0.03, # reserve margin, 6% of peak load
+    RM = 0.06, # reserve margin, 6% of peak load
 )
 
 # Edit unit commitment model here

@@ -158,22 +158,23 @@ timereaddata = @elapsed begin
     ESOCini = convert(Vector{Float64}, ESOCini)
     UCL = convert(Matrix{Float64}, UCL)
 
-    EDL = zeros(105408, size(UCL, 2))
+    EDL = Matrix(CSV.read(joinpath(folder, "realtimeload.csv"), DataFrame)[:,2:end]) # read demand, in MW
+    # EDL = zeros(105408, size(UCL, 2))
     EDHAvail = zeros(105408, size(HAvail, 2))
     EDRAvail = zeros(105408, size(RAvail, 2))
 
-    for i in axes(UCL, 2)
-        # Create an interpolation object for the current column
-        itp = interpolate(UCL[:, i], BSpline(Linear()))
+    # for i in axes(UCL, 2)
+    #     # Create an interpolation object for the current column
+    #     itp = interpolate(UCL[:, i], BSpline(Linear()))
 
-        # Scale the interpolation to the desired number of points
-        scale = length(itp) / size(EDL, 1)
+    #     # Scale the interpolation to the desired number of points
+    #     scale = length(itp) / size(EDL, 1)
 
-        # Fill the new matrix with the interpolated data
-        for j in 1:size(EDL, 1)-12+1
-            EDL[j, i] = itp((j - 1) * scale + 1)
-        end
-    end
+    #     # Fill the new matrix with the interpolated data
+    #     for j in 1:size(EDL, 1)-12+1
+    #         EDL[j, i] = itp((j - 1) * scale + 1)
+    #     end
+    # end
 
     for i in axes(HAvail, 2)
         # Create an interpolation object for the current column

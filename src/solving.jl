@@ -195,20 +195,20 @@ function solving(
                         # Update initial generation output for next time step
                         for i in axes(GPini, 1)
                             # if (h - 1) * EDSteps + t != UCHorizon * EDSteps
-                                set_normalized_rhs(
-                                    edmodel[:RUIni][i],
-                                    EDGPini[i] + 
-                                    GRU[i] / EDSteps +
-                                    (GPmin[i]) *
-                                    EDV[i, (h-1)*EDSteps+t+1],
-                                )
-                                set_normalized_rhs(
-                                    edmodel[:RDIni][i],
-                                    -EDGPini[i] +
-                                    GRD[i] / EDSteps +
-                                    (GPmin[i]) *
-                                    EDW[i, (h-1)*EDSteps+t+1],
-                                )
+                                # set_normalized_rhs(
+                                #     edmodel[:RUIni][i],
+                                #     EDGPini[i] + 
+                                #     GRU[i] / EDSteps +
+                                #     (GPmin[i]) *
+                                #     EDV[i, (h-1)*EDSteps+t+1],
+                                # )
+                                # set_normalized_rhs(
+                                #     edmodel[:RDIni][i],
+                                #     -EDGPini[i] +
+                                #     GRD[i] / EDSteps +
+                                #     (GPmin[i]) *
+                                #     EDW[i, (h-1)*EDSteps+t+1],
+                                # )
                                 # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i] + GPmin[i]*EDV[i,(h - 1) * EDSteps + t + 1])
                                 # set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i] + GPmin[i]*EDW[i,(h - 1) * EDSteps + t + 1])
                             # end

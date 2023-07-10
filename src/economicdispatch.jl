@@ -210,15 +210,15 @@ function economicdispatch(
         GPini[i] - guc[i, 1] <= GRD[i]
     )
     # if EDHorizon > 1
-    # @constraint(
-    #     ucmodel,
-    #     RU[i = 1:nucgen, t = 1:Horizon-1],
-    #     guc[i, t+1] - guc[i, t] <= GRU[i]
-    # )
-    # @constraint(
-    #     ucmodel,
-    #     RD[i = 1:nucgen, t = 1:Horizon-1],
-    #     guc[i, t] - guc[i, t+1] <= GRD[i]
-    # )
+    @constraint(
+        edmodel,
+        RU[i = 1:nucgen, t = 1:Horizon-1],
+        guc[i, t+1] - guc[i, t] <= GRU[i]
+    )
+    @constraint(
+        edmodel,
+        RD[i = 1:nucgen, t = 1:Horizon-1],
+        guc[i, t] - guc[i, t+1] <= GRD[i]
+    )
     return edmodel
 end
