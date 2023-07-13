@@ -207,7 +207,7 @@ timereaddata = @elapsed begin
     #  save variables to jld2 file into data folder
     @info "Saving data to ./data/WECC240.jld2..."
     save(
-        "./data/ADS2032.jld2",
+        "./data/ADS2032_Noise.jld2",
         "transmap",
         transmap,
         "TX",
