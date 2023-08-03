@@ -38,7 +38,7 @@ function economicdispatch(
     ngucs = size(GSMC, 2) # number of generator segments
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
-    nstorage = size(storagemap,1) # number of storage units
+    nstorage = size(storagemap, 1) # number of storage units
 
     # Define model
     edmodel = Model()
@@ -60,8 +60,8 @@ function economicdispatch(
         edmodel,
         Min,
         sum(GMC .* guc) / Steps +
-        sum(GSMC .* gucs)/ Steps +
-        sum(50 .* d - 20 .* c) / Steps +
+        sum(GSMC .* gucs) / Steps +
+        sum(100 .* d - 20 .* c) / Steps +
         sum(VOLL .* s) / Steps
     )
 
@@ -72,8 +72,7 @@ function economicdispatch(
         sum(genmap[:, z] .* guc[:, t]) +
         sum(hydromap[:, z] .* gh[:, t]) +
         sum(renewablemap[:, z] .* gr[:, t]) +
-        sum(storagemap[:, z] .* d[:, t]) -
-        sum(storagemap[:, z] .* c[:, t]) +
+        sum(storagemap[:, z] .* d[:, t]) - sum(storagemap[:, z] .* c[:, t]) +
         sum(transmap[:, z] .* f[:, t]) +
         s[z, t] == EDL[z, t]
     )
@@ -154,20 +153,22 @@ function economicdispatch(
     @constraint(
         edmodel,
         StorageSOCIni[i = 1:nstorage],
-        e[i, 1] == ESOCini[i] + c[i, 1] * Eeta[i] / Steps - d[i, 1] / Eeta[i] / Steps
+        e[i, 1] ==
+        ESOCini[i] + c[i, 1] * Eeta[i] / Steps - d[i, 1] / Eeta[i] / Steps
     )
 
     @constraint(
         edmodel,
         StorageSOC[i = 1:nstorage, t = 2:ntimepoints],
-        e[i, t] == e[i, t-1] + c[i, t] * Eeta[i] / Steps - d[i, t] / Eeta[i] / Steps
+        e[i, t] ==
+        e[i, t-1] + c[i, t] * Eeta[i] / Steps - d[i, t] / Eeta[i] / Steps
     )
 
     # Conventional generator segment constraints
     @constraint(
         edmodel,
         UCGenSeg1[i = 1:nucgen, t = 1:ntimepoints],
-        guc[i, t] == U[i] * GPmin[i] + sum(gucs[i,:,t])
+        guc[i, t] == U[i] * GPmin[i] + sum(gucs[i, :, t])
     )
 
     @constraint(
@@ -199,16 +200,8 @@ function economicdispatch(
         gr[i, t] <= RAvail[i, t]
     )
     # Ramping limits, set as one hour ramping limits for initial generation output
-    @constraint(
-        edmodel,
-        RUIni[i = 1:nucgen],
-        guc[i, 1] - GPini[i] <= GRU[i]
-    )
-    @constraint(
-        edmodel,
-        RDIni[i = 1:nucgen],
-        GPini[i] - guc[i, 1] <= GRD[i]
-    )
+    @constraint(edmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])
+    @constraint(edmodel, RDIni[i = 1:nucgen], GPini[i] - guc[i, 1] <= GRD[i])
     if Horizon > 1
         @constraint(
             edmodel,

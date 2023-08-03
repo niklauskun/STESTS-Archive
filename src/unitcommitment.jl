@@ -70,14 +70,14 @@ function unitcommitment(
     @variable(ucmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
     @variable(ucmodel, grr[1:nucgen, 1:ntimepoints] >= 0) # Conventional generator reserve
     @variable(ucmodel, gucs[1:nucgen, 1:ngucs, 1:ntimepoints] >= 0) # Conventional generator segment output
-    
+
     # Define objective function and constraints
     @objective(
         ucmodel,
         Min,
         sum(GMC .* guc + GNLC .* u + GSUC .* v) +
         sum(GSMC .* gucs) +
-        sum(50 .* d - 20 .* c) +
+        sum(100 .* d - 20 .* c) +
         sum(VOLL .* s)
     )
 
@@ -111,7 +111,7 @@ function unitcommitment(
     @constraint(
         ucmodel,
         UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <=  GRU[i]
+        grr[i, h] <= GRU[i]
     )
 
     @constraint(
@@ -182,7 +182,7 @@ function unitcommitment(
     @constraint(
         ucmodel,
         UCGenSeg1[i = 1:nucgen, h = 1:ntimepoints],
-        guc[i, h] == u[i, h] * GPmin[i] + sum(gucs[i,:,h])
+        guc[i, h] == u[i, h] * GPmin[i] + sum(gucs[i, :, h])
     )
 
     @constraint(
@@ -190,7 +190,6 @@ function unitcommitment(
         UCGenSeg2[i = 1:nucgen, j = 1:ngucs, h = 1:ntimepoints],
         gucs[i, j, h] <= GINCPmax[i, j]
     )
-
 
     # Conventional generator capacity limits
     @constraint(
