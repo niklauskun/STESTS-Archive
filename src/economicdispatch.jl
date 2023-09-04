@@ -28,8 +28,8 @@ function economicdispatch(
     ESOCini::Vector{Float64}; # storage initial state of charge
     Horizon::Int = 1, # planning horizon
     Steps::Int = 12, # planning steps
-    VOLL::Float64 = 9000.0, # value of lost load
-    RM::Float64 = 0.2, # reserve margin
+    VOLL::Float64 = 1000.0, # value of lost load
+    RM::Float64 = 0.03, # reserve margin
 )::JuMP.Model
     ntimepoints = Horizon # number of time points
     nbus = size(EDL, 1) # number of buses
@@ -61,7 +61,7 @@ function economicdispatch(
         Min,
         sum(GMC .* guc) / Steps +
         sum(GSMC .* gucs) / Steps +
-        sum(100 .* d - 20 .* c) / Steps +
+        sum(200 .* d - 0 .* c) / Steps +
         sum(VOLL .* s) / Steps
     )
 

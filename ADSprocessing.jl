@@ -6,7 +6,8 @@ using Interpolations
 
 RealTimeNoise = true
 CurrentMix = true
-DataName = "./data/ADS2032_Noise_C.jld2"
+TransmissionCap = false
+DataName = "./data/ADS2032_Noise_C_Zone4Adj.jld2"
 folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
 
 @info "Reading data from $folder..."
@@ -15,7 +16,11 @@ timereaddata = @elapsed begin
     transmap = Matrix(
         CSV.read(joinpath(folder, "TransmissionMap.csv"), DataFrame)[:, 2:end],
     ) # read transmission line map
-    transdata = CSV.read(joinpath(folder, "Transmission.csv"), DataFrame)
+    if TransmissionCap == true
+        transdata = CSV.read(joinpath(folder, "Transmission_Cap.csv"), DataFrame)
+    else
+        transdata = CSV.read(joinpath(folder, "Transmission.csv"), DataFrame)
+    end
     TX = transdata[!, :"X"] # read transmission reactance, in p.u.
     TFmax = transdata[!, :"Max Flow(MW)"] # read transmission line capacity, in MW
     #     THurdle = transdata[!,:"Hurdle Rate($/MW)"] # read transmission line hurdle rate, in $/MW
@@ -24,12 +29,12 @@ timereaddata = @elapsed begin
     # read generator data
     if CurrentMix == true
         genmap = Matrix(
-            CSV.read(joinpath(folder, "ThermalGenMap_C.csv"), DataFrame)[
+            CSV.read(joinpath(folder, "ThermalGenMap_C_Zone4Adj.csv"), DataFrame)[
                 :,
                 2:end,
             ],
         ) # read generator map
-        gendata = CSV.read(joinpath(folder, "ThermalGen_C.csv"), DataFrame)
+        gendata = CSV.read(joinpath(folder, "ThermalGen_C_Zone4Adj.csv"), DataFrame)
     else
         genmap = Matrix(
             CSV.read(joinpath(folder, "ThermalGenMap.csv"), DataFrame)[
@@ -41,6 +46,7 @@ timereaddata = @elapsed begin
     end
     GPmax = gendata[!, :"IOMaxCap(MW)"] # read generator maximum capacity, in MW
     GPmin = gendata[!, :"IOMinCap(MW)"] # read generator minimum capacity, in MW
+    GMustRun = gendata[!, :"MustRun"] # read generator must run status
     GNLC = gendata[!, :"NoLoadCost(\$)"] # read generator non-load cost, in $
     GMC = gendata[!, :"VOM Cost"] # read generator VOM cost, in $/MW
     GSMC = Matrix(gendata[:, 22:26]) # read generator segment marginal cost, in $/MW
@@ -54,6 +60,7 @@ timereaddata = @elapsed begin
     GPIni = gendata[!, :"InitialDispatch(MW)"] # read generator initial output
     @assert length(GPmax) ==
             length(GPmin) ==
+            length(GMustRun) ==
             length(GNLC) ==
             length(GMC) ==
             length(GType) ==
@@ -170,10 +177,18 @@ timereaddata = @elapsed begin
     @assert length(RPmax) == size(renewablemap, 1) == size(RAvail, 2) "Renewable data length mismatch."
 
     # read storage data
-    storagemap = Matrix(
-        CSV.read(joinpath(folder, "StorageMap.csv"), DataFrame)[:, 2:end],
+    # TODO currently overestimate storage capacity for feasibility
+    if CurrentMix == false
+        storagemap = Matrix(
+        CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
     )
-    storagedata = CSV.read(joinpath(folder, "Storage.csv"), DataFrame)
+        storagedata = CSV.read(joinpath(folder, "Storage_C.csv"), DataFrame)
+    else
+        storagemap = Matrix(
+            CSV.read(joinpath(folder, "StorageMap.csv"), DataFrame)[:, 2:end],
+        )
+        storagedata = CSV.read(joinpath(folder, "Storage.csv"), DataFrame)
+    end
     EPC = -storagedata[!, :"MinCap(MW)"] # read storage charge capacity, in MW
     EPD = storagedata[!, :"MaxCap(MW)"] # read storage discharge capacity, in MW
     Eeta = storagedata[!, :"Efficiency"] # read storage efficiency
@@ -208,6 +223,7 @@ timereaddata = @elapsed begin
     genmap = convert(Matrix{Int64}, genmap)
     GPmax = convert(Vector{Float64}, GPmax)
     GPmin = convert(Vector{Float64}, GPmin)
+    GMustRun = convert(Vector{Int64}, GMustRun)
     GNLC = convert(Vector{Float64}, GNLC)
     GMC = convert(Vector{Float64}, GMC)
     GSMC = convert(Matrix{Float64}, GSMC)
@@ -316,6 +332,8 @@ timereaddata = @elapsed begin
         GPmax,
         "GPmin",
         GPmin,
+        "GMustRun",
+        GMustRun,
         "GNLC",
         GNLC,
         "GMC",

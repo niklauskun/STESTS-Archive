@@ -1,6 +1,6 @@
 using JuMP
 """
-    unitcommitment()::JuMP.Model
+    unitcommitmentprice()::JuMP.Model
 
 Read system parameters and construct unit commitment model.
 Nik's note: In julia vectorized functions are not requireed for performance.
@@ -10,7 +10,7 @@ Nik's note: In julia vectorized functions are not requireed for performance.
 unitcommitment(L::Matrix{Float64})::JuMP.Model -> Multi-bus ucmodel
 unitcommitment(L::Vector{Float64})::JuMP.Model -> Single-bus ucmodel
 """
-function unitcommitment(
+function unitcommitmentprice(
     UCL::Matrix{Float64}, # Load
     genmap::Matrix{Int64}, # generator map
     GPmax::Vector{Float64}, # generator maximum output
@@ -54,31 +54,31 @@ function unitcommitment(
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
     nstorage = size(storagemap, 1) # number of storage units
+    U = zeros(Int, size(GPini,1), Horizon)
+    V = zeros(Int, size(GPini,1), Horizon)
+    W = zeros(Int, size(GPini,1), Horizon)
 
     # Define model
-    ucmodel = Model()
+    ucpmodel = Model()
 
     # Define decision variables
-    @variable(ucmodel, f[1:ntrans, 1:ntimepoints]) # Transmission flow
-    @variable(ucmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
-    @variable(ucmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
-    @variable(ucmodel, u[1:nucgen, 1:ntimepoints], Bin) # Conventional generator status, 1 if on, 0 if off
-    @variable(ucmodel, v[1:nucgen, 1:ntimepoints], Bin) # Conventional generator start-up decision, 1 if start-up, 0 otherwise
-    @variable(ucmodel, w[1:nucgen, 1:ntimepoints], Bin) # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
-    @variable(ucmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
-    @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
-    @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
-    @variable(ucmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
-    @variable(ucmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
-    @variable(ucmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
-    @variable(ucmodel, grr[1:nucgen, 1:ntimepoints] >= 0) # Conventional generator reserve
-    @variable(ucmodel, gucs[1:nucgen, 1:ngucs, 1:ntimepoints] >= 0) # Conventional generator segment output
+    @variable(ucpmodel, f[1:ntrans, 1:ntimepoints]) # Transmission flow
+    @variable(ucpmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
+    @variable(ucpmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
+    @variable(ucpmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
+    @variable(ucpmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
+    @variable(ucpmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
+    @variable(ucpmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
+    @variable(ucpmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
+    @variable(ucpmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
+    @variable(ucpmodel, grr[1:nucgen, 1:ntimepoints] >= 0) # Conventional generator reserve
+    @variable(ucpmodel, gucs[1:nucgen, 1:ngucs, 1:ntimepoints] >= 0) # Conventional generator segment output
 
     # Define objective function and constraints
     @objective(
-        ucmodel,
+        ucpmodel,
         Min,
-        sum(GMC .* guc + GNLC .* u + GSUC .* v) +
+        sum(GMC .* guc) +
         sum(GSMC .* gucs) +
         sum(200.0 .* d - 0.0 .* c) +
         sum(VOLL .* s)
@@ -86,7 +86,7 @@ function unitcommitment(
 
     # Bus wise load balance constraints with transmission
     @constraint(
-        ucmodel,
+        ucpmodel,
         LoadBalance[z = 1:nbus, h = 1:ntimepoints],
         sum(genmap[:, z] .* guc[:, h]) +
         sum(hydromap[:, z] .* gh[:, h]) +
@@ -106,40 +106,40 @@ function unitcommitment(
 
     # System reserve constraints
     @constraint(
-        ucmodel,
+        ucpmodel,
         UnitReserve1[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= GPmax[i] * u[i, h] - guc[i, h]
+        grr[i, h] <= GPmax[i] * U[i, h] - guc[i, h]
     )
 
     @constraint(
-        ucmodel,
+        ucpmodel,
         UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
         grr[i, h] <= GRU[i]/6
     )
 
     @constraint(
-        ucmodel,
+        ucpmodel,
         Reserve[h = 1:ntimepoints],
         sum(grr[:, h]) >= RM * maximum(sum(UCL, dims = 2))
     )
 
     # # Transmission capacity limits
     @constraint(
-        ucmodel,
+        ucpmodel,
         TXCapTo[l = 1:ntrans, h = 1:ntimepoints],
         f[l, h] <= TFmax[l]
     )
     @constraint(
-        ucmodel,
+        ucpmodel,
         TXCapFrom[l = 1:ntrans, h = 1:ntimepoints],
         f[l, h] >= -TFmax[l]
     )
 
     # # DCOPF constraints
     # set reference angle
-    @constraint(ucmodel, REFBUS[h = 1:ntimepoints], θ[1, h] == 0)
+    @constraint(ucpmodel, REFBUS[h = 1:ntimepoints], θ[1, h] == 0)
     @constraint(
-        ucmodel,
+        ucpmodel,
         DCOPTX[l = 1:ntrans, h = 1:ntimepoints],
         f[l, h] ==
         TX[l] * (
@@ -150,76 +150,76 @@ function unitcommitment(
 
     # Storage charge and discharge constraints
     @constraint(
-        ucmodel,
+        ucpmodel,
         StorageCharge[i = 1:nstorage, h = 1:ntimepoints],
         c[i, h] <= EPC[i]
     )
 
     @constraint(
-        ucmodel,
+        ucpmodel,
         StorageDischarge[i = 1:nstorage, h = 1:ntimepoints],
         d[i, h] <= EPD[i]
     )
 
     # Storage energy level constraints
     @constraint(
-        ucmodel,
+        ucpmodel,
         StorageSOCCap[i = 1:nstorage, h = 1:ntimepoints],
         e[i, h] <= ESOC[i]
     )
 
     # Storage SOC evolution constraints
     @constraint(
-        ucmodel,
+        ucpmodel,
         StorageSOCIni[i = 1:nstorage],
         e[i, 1] == ESOCini[i] + c[i, 1] * Eeta[i] - d[i, 1] / Eeta[i]
     )
 
     @constraint(
-        ucmodel,
+        ucpmodel,
         StorageSOC[i = 1:nstorage, h = 2:ntimepoints],
         e[i, h] == e[i, h-1] + c[i, h] * Eeta[i] - d[i, h] / Eeta[i]
     )
 
     # Conventional generator must run constraints
-    @constraint(
-        ucmodel,
-        UCMustRun[i = 1:nucgen, h = 1:ntimepoints],
-        u[i, h] >= GMustRun[i]
-    )
+    # @constraint(
+    #     ucpmodel,
+    #     UCMustRun[i = 1:nucgen, h = 1:ntimepoints],
+    #     u[i, h] >= GMustRun[i]
+    # )
 
     # Conventional generator segment constraints
     @constraint(
-        ucmodel,
+        ucpmodel,
         UCGenSeg1[i = 1:nucgen, h = 1:ntimepoints],
-        guc[i, h] == u[i, h] * GPmin[i] + sum(gucs[i, :, h])
+        guc[i, h] == U[i, h] * GPmin[i] + sum(gucs[i, :, h])
     )
 
     @constraint(
-        ucmodel,
+        ucpmodel,
         UCGenSeg2[i = 1:nucgen, j = 1:ngucs, h = 1:ntimepoints],
         gucs[i, j, h] <= GINCPmax[i, j]
     )
 
     # Conventional generator capacity limits
     @constraint(
-        ucmodel,
+        ucpmodel,
         UCCapU[i = 1:nucgen, h = 1:Horizon],
-        guc[i, h] <= u[i, h] * GPmax[i]
+        guc[i, h] <= U[i, h] * GPmax[i]
     )
     @constraint(
-        ucmodel,
+        ucpmodel,
         UCCapL[i = 1:nucgen, h = 1:Horizon],
-        guc[i, h] >= u[i, h] * GPmin[i]
+        guc[i, h] >= U[i, h] * GPmin[i]
     )
     # Hydro and renewable capacity limits
     @constraint(
-        ucmodel,
+        ucpmodel,
         HCap[i = 1:nhydro, h = 1:Horizon],
         gh[i, h] <= HAvail[i, h]
     )
     @constraint(
-        ucmodel,
+        ucpmodel,
         ReCap[i = 1:nrenewable, h = 1:Horizon],
         gr[i, h] <= RAvail[i, h]
     )
@@ -237,38 +237,38 @@ function unitcommitment(
     #     guc[i, h] - guc[i, h+1] <= GRD[i]
     # )
     @constraint(
-        ucmodel,
+        ucpmodel,
         RUIni[i = 1:nucgen],
-        guc[i, 1] - GPini[i] <= GRU[i] + GPmin[i] * v[i, 1]
+        guc[i, 1] - GPini[i] <= GRU[i] + GPmin[i] * V[i, 1]
     )
     @constraint(
-        ucmodel,
+        ucpmodel,
         RDIni[i = 1:nucgen],
-        GPini[i] - guc[i, 1] <= GRD[i] + GPmin[i] * w[i, 1]
+        GPini[i] - guc[i, 1] <= GRD[i] + GPmin[i] * W[i, 1]
     )
     @constraint(
-        ucmodel,
+        ucpmodel,
         RU[i = 1:nucgen, h = 1:Horizon-1],
-        guc[i, h+1] - guc[i, h] <= GRU[i] + GPmin[i] * v[i, h+1]
+        guc[i, h+1] - guc[i, h] <= GRU[i] + GPmin[i] * V[i, h+1]
     )
     @constraint(
-        ucmodel,
+        ucpmodel,
         RD[i = 1:nucgen, h = 1:Horizon-1],
-        guc[i, h] - guc[i, h+1] <= GRD[i] + GPmin[i] * w[i, h+1]
+        guc[i, h] - guc[i, h+1] <= GRD[i] + GPmin[i] * W[i, h+1]
     )
 
     # State transition constraints
-    @constraint(
-        ucmodel,
-        ST0[i = 1:nucgen],
-        u[i, 1] - UInput[i] == v[i, 1] - w[i, 1]
-    )
+    # @constraint(
+    #     ucpmodel,
+    #     ST0[i = 1:nucgen],
+    #     U[i, 1] - UInput[i] == V[i, 1] - W[i, 1]
+    # )
 
-    @constraint(
-        ucmodel,
-        ST1[i = 1:nucgen, h = 2:Horizon],
-        u[i, h] - u[i, h-1] == v[i, h] - w[i, h]
-    )
+    # @constraint(
+    #     ucpmodel,
+    #     ST1[i = 1:nucgen, h = 2:Horizon],
+    #     U[i, h] - U[i, h-1] == V[i, h] - W[i, h]
+    # )
 
     # @constraint(
     #     ucmodel,
@@ -283,28 +283,28 @@ function unitcommitment(
     # )
 
     # Minimum up/down time constraints
-    @constraint(
-        ucmodel,
-        UTime[i = 1:nucgen, h = 1:Horizon],
-        sum(v[i, max(1, h - GUT[i] + 1):h]) <= u[i, h]
-    )
-    @constraint(
-        ucmodel,
-        DTime[i = 1:nucgen, h = 1:Horizon],
-        sum(w[i, max(1, h - GDT[i] + 1):h]) <= 1 - u[i, h]
-    )
+    # @constraint(
+    #     ucpmodel,
+    #     UTime[i = 1:nucgen, h = 1:Horizon],
+    #     sum(V[i, max(1, h - GUT[i] + 1):h]) <= U[i, h]
+    # )
+    # @constraint(
+    #     ucpmodel,
+    #     DTime[i = 1:nucgen, h = 1:Horizon],
+    #     sum(W[i, max(1, h - GDT[i] + 1):h]) <= 1 - U[i, h]
+    # )
 
-    @constraint(
-        ucmodel, 
-        UTimeIni[i = 1:nucgen],
-        sum(0 .* u[i, :]) == SU[i]
-    )
+    # @constraint(
+    #     ucpmodel, 
+    #     UTimeIni[i = 1:nucgen],
+    #     sum(0 .* U[i, :]) == SU[i]
+    # )
 
-    @constraint(
-        ucmodel,
-        DTimeIni[i = 1:nucgen],
-        sum(0 .* u[i, :]) == SD[i]
-    )
+    # @constraint(
+    #     ucpmodel,
+    #     DTimeIni[i = 1:nucgen],
+    #     sum(0 .* U[i, :]) == SD[i]
+    # )
 
-    return ucmodel
+    return ucpmodel
 end
