@@ -31,22 +31,23 @@ ESOC,
 ESOCini,
 EDL,
 EDHAvail,
-EDRAvail = STESTS.read_jld2("./data/ADS2032_Noise_C_Zone4Adj.jld2")
-output_folder = "output/ADS2032_Noise_C_Zone4Adj_MustRun_HistoricalAverarageBids"
+EDRAvail = STESTS.read_jld2("./data/ADS2032_Noise_C_ESC.jld2")
+output_folder = "output/UC25ED6_ES5GW_DoubleNoise"
 if !isdir(output_folder)
     mkdir(output_folder)
 end
 
+RM = 0.03
+VOLL = 9000.0
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-# NDay = Int(size(UCL, 1) / UCHorizon)
-NDay = 1
+EDHorizon = Int(6) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
+NDay = 7
 EDSteps = Int(12) # number of 5-min intervals in a hour
 # EDL = repeat(UCL, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
 #   # load for economic dispatch, MW, repeat by ED steps w/o noise
 # EDRAvail = repeat(RAvail, inner = (EDSteps, 1)) # load for economic dispatch, MW, repeat by ED steps w/o noise
-EDHorizon = Int(13) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead, 24 with 2-hour look-ahead, 48 with 4-hour look-ahead
-EDGSMC = repeat(GSMC, outer = (1,1,EDHorizon)) # segment marginal cost of generators, repeat by UCHorizon
-GSMC = repeat(GSMC, outer = (1,1,UCHorizon)) # segment marginal cost of generators, repeat by UCHorizon
+EDGSMC = repeat(GSMC, outer = (1, 1, EDHorizon)) # segment marginal cost of generators, repeat by UCHorizon
+GSMC = repeat(GSMC, outer = (1, 1, UCHorizon)) # segment marginal cost of generators, repeat by UCHorizon
 #select first UCHorizon rows of UCL as initial input to unit commitment model
 UCLInput = convert(Matrix{Float64}, UCL[1:UCHorizon, :]')
 UCHAvailInput = convert(Matrix{Float64}, HAvail[1:UCHorizon, :]')
@@ -56,18 +57,160 @@ EDLInput = convert(Matrix{Float64}, EDL[1:EDHorizon, :]')
 EDHAvailInput = convert(Matrix{Float64}, EDHAvail[1:EDHorizon, :]')
 EDRAvailInput = convert(Matrix{Float64}, EDRAvail[1:EDHorizon, :]')
 UInput = convert(Array{Int64,1}, GPini .!= 0) # initial status of generators, 1 if on, 0 if off
-SU = zeros(Int, size(GPini,1)) # initial generator must on time
-SD = zeros(Int, size(GPini,1)) # initial generator down on time
+SU = zeros(Int, size(GPini, 1)) # initial generator must on time
+SD = zeros(Int, size(GPini, 1)) # initial generator down on time
 # UInput = ones(Int, size(GPini,1)) # initial status of generators, 1 if on, 0 if off
-DADBidsSingle = [150, 150, 145, 140, 135, 130, 125, 140, 150, 150, 150, 150, 150, 145, 140, 120, 100, 80, 60, 50, 80,
-                110, 140, 150, 150, 150, 145, 140, 135, 130, 125, 140, 150, 150, 150, 150, 150, 145, 140, 120, 100, 80, 60, 50, 80,
-                110, 140, 150]
-DACBidsSingle = [-50, -50, -50, -50, -50, -50, -50, -50, -35, -20, -5, 10, 25, 10, -5, -20, -35, -50, -50, -50, -50,
-                -50, -50, -50, -50, -50, -50, -50, -50, -50, -50, -50, -35, -20, -5, 10, 25, 10, -5, -20, -35, -50, -50, -50, -50,
-                -50, -50, -50,]
-DADBids = repeat(DADBidsSingle', size(storagemap,1), 1)
-DACBids = repeat(DACBidsSingle', size(storagemap,1), 1)
-RTDBids = repeat(DADBids, inner = (1, EDSteps))    
+DADBidsSingle = [
+    150,
+    150,
+    145,
+    140,
+    135,
+    130,
+    125,
+    140,
+    150,
+    150,
+    150,
+    150,
+    150,
+    145,
+    140,
+    120,
+    100,
+    80,
+    60,
+    50,
+    80,
+    110,
+    140,
+    150,
+    150,
+    150,
+    145,
+    140,
+    135,
+    130,
+    125,
+    140,
+    150,
+    150,
+    150,
+    150,
+    150,
+    145,
+    140,
+    120,
+    100,
+    80,
+    60,
+    50,
+    80,
+    110,
+    140,
+    150,
+    150,
+    150,
+    145,
+    140,
+    135,
+    130,
+    125,
+    140,
+    150,
+    150,
+    150,
+    150,
+    150,
+    145,
+    140,
+    120,
+    100,
+    80,
+    60,
+    50,
+    80,
+    110,
+    140,
+    150,
+]
+DACBidsSingle = [
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -35,
+    -20,
+    -5,
+    10,
+    25,
+    10,
+    -5,
+    -20,
+    -35,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -35,
+    -20,
+    -5,
+    10,
+    25,
+    10,
+    -5,
+    -20,
+    -35,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -35,
+    -20,
+    -5,
+    10,
+    25,
+    10,
+    -5,
+    -20,
+    -35,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+    -50,
+]
+DADBids = repeat(DADBidsSingle', size(storagemap, 1), 1)
+DACBids = repeat(DACBidsSingle', size(storagemap, 1), 1)
+RTDBids = repeat(DADBids, inner = (1, EDSteps))
 RTCBids = repeat(DACBids, inner = (1, EDSteps))
 
 # Formulate unit commitment model
@@ -104,8 +247,8 @@ ucmodel = STESTS.unitcommitment(
     ESOC,
     ESOCini,
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-    VOLL = 1000.0, # value of lost load, $/MWh
-    RM = 0.03, # reserve margin, 6% of peak load
+    VOLL = VOLL, # value of lost load, $/MWh
+    RM = RM, # reserve margin, 6% of peak load
 )
 
 # Edit unit commitment model here
@@ -149,8 +292,8 @@ ucpmodel = STESTS.unitcommitmentprice(
     ESOC,
     ESOCini,
     Horizon = UCHorizon, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-    VOLL = 1000.0, # value of lost load, $/MWh
-    RM = 0.03, # reserve margin, 6% of peak load
+    VOLL = VOLL, # value of lost load, $/MWh
+    RM = RM, # reserve margin, 6% of peak load
 )
 
 # Edit unit commitment model here
@@ -190,7 +333,7 @@ edmodel = STESTS.economicdispatch(
     ESOCini,
     Horizon = EDHorizon,
     Steps = EDSteps, # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-    VOLL = 1000.0, # value of lost load, $/MWh
+    VOLL = VOLL, # value of lost load, $/MWh
 )
 
 # Edit economic dispatch model here
@@ -232,6 +375,7 @@ timesolve = @elapsed begin
         DACBids,
         RTDBids,
         RTCBids,
+        ESOCini,
         ucmodel,
         ucpmodel,
         edmodel,
@@ -239,13 +383,17 @@ timesolve = @elapsed begin
         UCHorizon = UCHorizon,
         EDHorizon = EDHorizon,
         EDSteps = EDSteps,
-        VOLL = 1000.0,
+        VOLL = VOLL,
+        RM = RM,
     )
 end
 @info "Solving took $timesolve seconds."
 
 CSV.write(joinpath(output_folder, "UCgentotal.csv"), DataFrame(UCgen, :auto))
-CSV.write(joinpath(output_folder, "UCnetgentotal.csv"), DataFrame(UCnetgen, :auto))
+CSV.write(
+    joinpath(output_folder, "UCnetgentotal.csv"),
+    DataFrame(UCnetgen, :auto),
+)
 
 println("The UC cost is: ", sum(UCcost))
 println("The ED cost is: ", sum(EDcost))

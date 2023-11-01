@@ -54,9 +54,9 @@ function unitcommitmentprice(
     nhydro = size(hydromap, 1) # number of hydro generators
     nrenewable = size(renewablemap, 1) # number of renewable generators
     nstorage = size(storagemap, 1) # number of storage units
-    U = zeros(Int, size(GPini,1), Horizon)
-    V = zeros(Int, size(GPini,1), Horizon)
-    W = zeros(Int, size(GPini,1), Horizon)
+    U = zeros(Int, size(GPini, 1), Horizon)
+    V = zeros(Int, size(GPini, 1), Horizon)
+    W = zeros(Int, size(GPini, 1), Horizon)
 
     # Define model
     ucpmodel = Model()
@@ -80,7 +80,7 @@ function unitcommitmentprice(
         Min,
         sum(GMC .* guc) +
         sum(GSMC .* gucs) +
-        sum(200.0 .* d - 0.0 .* c) +
+        sum(300.0 .* d - 0.0 .* c) +
         sum(VOLL .* s)
     )
 
@@ -114,13 +114,13 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= GRU[i]/6
+        grr[i, h] <= GRU[i] / 6
     )
 
     @constraint(
         ucpmodel,
         Reserve[h = 1:ntimepoints],
-        sum(grr[:, h]) >= RM * maximum(sum(UCL, dims = 2))
+        sum(grr[:, h]) >= RM * sum(UCL, dims = 1)[h]
     )
 
     # # Transmission capacity limits
@@ -179,6 +179,12 @@ function unitcommitmentprice(
         ucpmodel,
         StorageSOC[i = 1:nstorage, h = 2:ntimepoints],
         e[i, h] == e[i, h-1] + c[i, h] * Eeta[i] - d[i, h] / Eeta[i]
+    )
+
+    @constraint(
+        ucpmodel,
+        StorageSOCEnd[i = 1:nstorage, h = 1:ntimepoints; h % 24 == 0],  # Apply constraint for every h divisible by 24
+        e[i, h] >= ESOCini[i]
     )
 
     # Conventional generator must run constraints

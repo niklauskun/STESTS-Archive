@@ -80,7 +80,7 @@ function unitcommitment(
         Min,
         sum(GMC .* guc + GNLC .* u + GSUC .* v) +
         sum(GSMC .* gucs) +
-        sum(200.0 .* d - 0.0 .* c) +
+        sum(300.0 .* d - 0.0 .* c) +
         sum(VOLL .* s)
     )
 
@@ -114,13 +114,13 @@ function unitcommitment(
     @constraint(
         ucmodel,
         UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= GRU[i]/6
+        grr[i, h] <= GRU[i] / 6
     )
 
     @constraint(
         ucmodel,
         Reserve[h = 1:ntimepoints],
-        sum(grr[:, h]) >= RM * maximum(sum(UCL, dims = 2))
+        sum(grr[:, h]) >= RM * sum(UCL, dims = 1)[h]
     )
 
     # # Transmission capacity limits
@@ -179,6 +179,12 @@ function unitcommitment(
         ucmodel,
         StorageSOC[i = 1:nstorage, h = 2:ntimepoints],
         e[i, h] == e[i, h-1] + c[i, h] * Eeta[i] - d[i, h] / Eeta[i]
+    )
+
+    @constraint(
+        ucmodel,
+        StorageSOCEnd[i = 1:nstorage, h = 1:ntimepoints; h % 24 == 0],  # Apply constraint for every h divisible by 24
+        e[i, h] >= ESOCini[i]
     )
 
     # Conventional generator must run constraints
@@ -294,17 +300,9 @@ function unitcommitment(
         sum(w[i, max(1, h - GDT[i] + 1):h]) <= 1 - u[i, h]
     )
 
-    @constraint(
-        ucmodel, 
-        UTimeIni[i = 1:nucgen],
-        sum(0 .* u[i, :]) == SU[i]
-    )
+    @constraint(ucmodel, UTimeIni[i = 1:nucgen], sum(0 .* u[i, :]) == SU[i])
 
-    @constraint(
-        ucmodel,
-        DTimeIni[i = 1:nucgen],
-        sum(0 .* u[i, :]) == SD[i]
-    )
+    @constraint(ucmodel, DTimeIni[i = 1:nucgen], sum(0 .* u[i, :]) == SD[i])
 
     return ucmodel
 end

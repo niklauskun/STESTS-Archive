@@ -7,7 +7,7 @@ using Interpolations
 RealTimeNoise = true
 CurrentMix = true
 TransmissionCap = false
-DataName = "./data/ADS2032_Noise_C_Zone4Adj.jld2"
+DataName = "./data/ADS2032_Noise_C_ESC.jld2"
 folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
 
 @info "Reading data from $folder..."
@@ -17,7 +17,8 @@ timereaddata = @elapsed begin
         CSV.read(joinpath(folder, "TransmissionMap.csv"), DataFrame)[:, 2:end],
     ) # read transmission line map
     if TransmissionCap == true
-        transdata = CSV.read(joinpath(folder, "Transmission_Cap.csv"), DataFrame)
+        transdata =
+            CSV.read(joinpath(folder, "Transmission_Cap.csv"), DataFrame)
     else
         transdata = CSV.read(joinpath(folder, "Transmission.csv"), DataFrame)
     end
@@ -29,12 +30,12 @@ timereaddata = @elapsed begin
     # read generator data
     if CurrentMix == true
         genmap = Matrix(
-            CSV.read(joinpath(folder, "ThermalGenMap_C_Zone4Adj.csv"), DataFrame)[
+            CSV.read(joinpath(folder, "ThermalGenMap_C.csv"), DataFrame)[
                 :,
                 2:end,
             ],
         ) # read generator map
-        gendata = CSV.read(joinpath(folder, "ThermalGen_C_Zone4Adj.csv"), DataFrame)
+        gendata = CSV.read(joinpath(folder, "ThermalGen_C.csv"), DataFrame)
     else
         genmap = Matrix(
             CSV.read(joinpath(folder, "ThermalGenMap.csv"), DataFrame)[
@@ -47,9 +48,9 @@ timereaddata = @elapsed begin
     GPmax = gendata[!, :"IOMaxCap(MW)"] # read generator maximum capacity, in MW
     GPmin = gendata[!, :"IOMinCap(MW)"] # read generator minimum capacity, in MW
     GMustRun = gendata[!, :"MustRun"] # read generator must run status
-    GNLC = gendata[!, :"NoLoadCost(\$)"] # read generator non-load cost, in $
-    GMC = gendata[!, :"VOM Cost"] # read generator VOM cost, in $/MW
-    GSMC = Matrix(gendata[:, 22:26]) # read generator segment marginal cost, in $/MW
+    GNLC = gendata[!, :"NoLoadCost(\$)"] * 2 # read generator non-load cost, in $
+    GMC = gendata[!, :"VOM Cost"] * 2 # read generator VOM cost, in $/MW
+    GSMC = Matrix(gendata[:, 22:26]) * 2 # read generator segment marginal cost, in $/MW
     GINCPmax = Matrix(gendata[:, 5:9]) # read generator segment maximum capacity, in MW
     GType = gendata[!, :"SubType"] # read generator type
     GRU = gendata[!, :"RampUp Rate(MW/minute)"] * 60 # read generator ramp up rate, in MW/hour
@@ -178,10 +179,10 @@ timereaddata = @elapsed begin
 
     # read storage data
     # TODO currently overestimate storage capacity for feasibility
-    if CurrentMix == false
+    if CurrentMix == true
         storagemap = Matrix(
-        CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
-    )
+            CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
+        )
         storagedata = CSV.read(joinpath(folder, "Storage_C.csv"), DataFrame)
     else
         storagemap = Matrix(
@@ -189,10 +190,10 @@ timereaddata = @elapsed begin
         )
         storagedata = CSV.read(joinpath(folder, "Storage.csv"), DataFrame)
     end
-    EPC = -storagedata[!, :"MinCap(MW)"] # read storage charge capacity, in MW
-    EPD = storagedata[!, :"MaxCap(MW)"] # read storage discharge capacity, in MW
+    EPC = -storagedata[!, :"MinCap(MW)"] * 2.5 # read storage charge capacity, in MW
+    EPD = storagedata[!, :"MaxCap(MW)"] * 2.5 # read storage discharge capacity, in MW
     Eeta = storagedata[!, :"Efficiency"] # read storage efficiency
-    ESOC = storagedata[!, :"MaxCap(MWh)"] # read storage state of charge capacity, in MWh
+    ESOC = storagedata[!, :"MaxCap(MWh)"] * 2.5 # read storage state of charge capacity, in MWh
     ESOCini = 0.5 * ESOC # initial state of charge, in MWh
     @assert length(EPC) == size(storagemap, 1) "storage data length mismatch."
 
@@ -255,14 +256,14 @@ timereaddata = @elapsed begin
     if RealTimeNoise == true
         if CurrentMix == true
             EDL = Matrix(
-                CSV.read(joinpath(folder, "realtimeload_C.csv"), DataFrame)[
+                CSV.read(joinpath(folder, "realtimeload_C_R.csv"), DataFrame)[
                     :,
                     2:end,
                 ],
             ) # read demand, in MW
         else
             EDL = Matrix(
-                CSV.read(joinpath(folder, "realtimeload.csv"), DataFrame)[
+                CSV.read(joinpath(folder, "realtimeload_R.csv"), DataFrame)[
                     :,
                     2:end,
                 ],
