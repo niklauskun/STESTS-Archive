@@ -20,35 +20,12 @@ end
 
 # Solving unit commitment and economic dispatch model by iterativly updating parameters
 function solving(
+    params::STESTS.ModelParams,
     Nday::Int,
-    UCL::Matrix{Float64},
-    HAvail::Matrix{Float64},
-    RAvail::Matrix{Float64},
-    genmap::Matrix{Int64},
-    hydromap::Matrix{Int64},
-    renewablemap::Matrix{Int64},
-    storagemap::Matrix{Int64},
-    GRU::Vector{Float64},
-    GRD::Vector{Float64},
-    GPmax::Vector{Float64},
-    GPmin::Vector{Float64},
-    GPini::Vector{Float64},
-    GMC::Vector{Float64},
-    GSMC::Array{Float64,3},
-    GNLC::Vector{Float64},
-    GSUC::Vector{Float64},
-    GUT::Vector{Int64},
-    GDT::Vector{Int64},
-    SU::Vector{Int64},
-    SD::Vector{Int64},
-    EDL::Matrix{Float64},
-    EDHAvail::Matrix{Float64},
-    EDRAvail::Matrix{Float64},
     DADBids::Matrix{Int64},
     DACBids::Matrix{Int64},
     RTDBids::Matrix{Int64},
     RTCBids::Matrix{Int64},
-    ESOCini::Vector{Float64},
     ucmodel::JuMP.Model,
     ucpmodel::JuMP.Model,
     edmodel::JuMP.Model,
@@ -59,6 +36,10 @@ function solving(
     VOLL::Float64 = 1000.0,
     RM::Float64 = 0.03,
 )
+    GSMC = repeat(params.GSMC, outer = (1, 1, UCHorizon))
+    SU = zeros(Int, size(params.GPIni, 1)) # initial generator must on time
+    SD = zeros(Int, size(params.GPIni, 1)) # initial generator down on time
+
     UCcost = Array{Float64}(undef, Nday)
     GMCcost = Array{Float64}(undef, Nday)
     GSMCcost = Array{Float64}(undef, Nday)
@@ -71,16 +52,22 @@ function solving(
     EDGSMCcost = Array{Float64}(undef, Nday * 24 * EDSteps)
     EDVOLL = Array{Float64}(undef, Nday * 24 * EDSteps)
     EDEScost = Array{Float64}(undef, Nday * 24 * EDSteps)
-    EDGPini = Array{Float64}(undef, size(GPini, 1))
+    EDGPIni = Array{Float64}(undef, size(params.GPIni, 1))
+    GPIniInput = params.GPIni
 
     set_optimizer_attribute(ucmodel, "MIPGap", 0.01)
     for d in 1:Nday
         # Update load and renewable generation
-        LInput = convert(Matrix{Float64}, UCL[24*(d-1)+1:24*d+UCHorizon, :]')
-        HAvailInput =
-            convert(Matrix{Float64}, HAvail[24*(d-1)+1:24*d+UCHorizon, :]')
-        RAvailInput =
-            convert(Matrix{Float64}, RAvail[24*(d-1)+1:24*d+UCHorizon, :]')
+        LInput =
+            convert(Matrix{Float64}, params.UCL[24*(d-1)+1:24*d+UCHorizon, :]')
+        HAvailInput = convert(
+            Matrix{Float64},
+            params.HAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+        )
+        RAvailInput = convert(
+            Matrix{Float64},
+            params.RAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+        )
         for h in 1:UCHorizon
             # set_normalized_rhs(ucmodel[:Reserve][h], (1 + 0.2) * sum(DInput[:, h])-sum(HAvailInput[:, h])-sum(RAvailInput[:, h]))
             for z in axes(LInput, 1)
@@ -132,7 +119,7 @@ function solving(
 
         # Extract solution and solve economic dispatch model
         if termination_status(ucmodel) == MOI.OPTIMAL
-            GMCcost[d] = sum(value.(ucmodel[:guc])[:, 1:24] .* GMC)
+            GMCcost[d] = sum(value.(ucmodel[:guc])[:, 1:24] .* params.GMC)
             GSMCcost[d] =
                 sum(value.(ucmodel[:gucs])[:, :, 1:24] .* GSMC[:, :, 1:24])
             VOLLcost[d] = sum(value.(ucmodel[:s])[1:24] .* VOLL)
@@ -147,8 +134,8 @@ function solving(
                 VOLLcost[d] +
                 EScost[d] +
                 sum(
-                    value.(ucmodel[:u])[:, 1:24] .* GNLC +
-                    value.(ucmodel[:v])[:, 1:24] .* GSUC,
+                    value.(ucmodel[:u])[:, 1:24] .* params.GNLC +
+                    value.(ucmodel[:v])[:, 1:24] .* params.GSUC,
                 )
             # UCcost[d] = objective_value(ucmodel)
             UCnetgen[d, :] = sum(value.(ucmodel[:guc]), dims = 1)[:]
@@ -198,26 +185,28 @@ function solving(
                 UCHdf,
                 append = true,
             )
-            UCGZone = DataFrame(value.(ucmodel[:guc])' * genmap, :auto)
+            UCGZone = DataFrame(value.(ucmodel[:guc])' * params.genmap, :auto)
             CSV.write(
                 joinpath(output_folder, "UCGenZone.csv"),
                 UCGZone,
                 append = true,
             )
-            UCHydroZone = DataFrame(value.(ucmodel[:gh])' * hydromap, :auto)
+            UCHydroZone =
+                DataFrame(value.(ucmodel[:gh])' * params.hydromap, :auto)
             CSV.write(
                 joinpath(output_folder, "UCHydroZone.csv"),
                 UCHydroZone,
                 append = true,
             )
             UCRenewableZone =
-                DataFrame(value.(ucmodel[:gr])' * renewablemap, :auto)
+                DataFrame(value.(ucmodel[:gr])' * params.renewablemap, :auto)
             CSV.write(
                 joinpath(output_folder, "UCRenewableZone.csv"),
                 UCRenewableZone,
                 append = true,
             )
-            UCSoCZone = DataFrame(value.(ucmodel[:e])' * storagemap, :auto)
+            UCSoCZone =
+                DataFrame(value.(ucmodel[:e])' * params.storagemap, :auto)
             CSV.write(
                 joinpath(output_folder, "UCSoCZone.csv"),
                 UCSoCZone,
@@ -231,18 +220,18 @@ function solving(
             )
 
             # Update status and must up/down constraints for next day
-            SU = getLastOneIndex(V[:, 1:24], SU, GUT)
-            SD = getLastOneIndex(W[:, 1:24], SD, GDT)
-            SUInt = zeros(Int, size(GPini, 1), UCHorizon)
-            SDInt = zeros(Int, size(GPini, 1), UCHorizon)
-            for i in axes(GPini, 1)
+            SU = getLastOneIndex(V[:, 1:24], SU, params.GUT)
+            SD = getLastOneIndex(W[:, 1:24], SD, params.GDT)
+            SUInt = zeros(Int, size(params.GPIni, 1), UCHorizon)
+            SDInt = zeros(Int, size(params.GPIni, 1), UCHorizon)
+            for i in axes(params.GPIni, 1)
                 num_ones_SU = min(SU[i], UCHorizon)
                 num_ones_SD = min(SD[i], UCHorizon)
                 SUInt[i, 1:num_ones_SU] .= Int64(1)
                 SDInt[i, 1:num_ones_SD] .= Int64(1)
             end
 
-            for i in axes(GPini, 1)
+            for i in axes(params.GPIni, 1)
                 set_normalized_rhs(ucmodel[:ST0][i], U[i, 24])
                 set_normalized_rhs(ucmodel[:UTimeIni][i], SU[i])
                 set_normalized_rhs(ucmodel[:DTimeIni][i], SD[i])
@@ -261,42 +250,42 @@ function solving(
             end
 
             # Calculate day-ahead price
-            for i in axes(GPini, 1)
+            for i in axes(params.GPIni, 1)
                 for h in 1:UCHorizon
                     set_normalized_rhs(
                         ucpmodel[:UnitReserve1][i, h],
-                        GPmax[i] * U[i, h],
+                        params.GPmax[i] * U[i, h],
                     )
                     set_normalized_rhs(
                         ucpmodel[:UCGenSeg1][i, h],
-                        GPmin[i] * U[i, h],
+                        params.GPmin[i] * U[i, h],
                     )
                     set_normalized_rhs(
                         ucpmodel[:UCCapU][i, h],
-                        GPmax[i] * U[i, h],
+                        params.GPmax[i] * U[i, h],
                     )
                     set_normalized_rhs(
                         ucpmodel[:UCCapL][i, h],
-                        GPmin[i] * U[i, h],
+                        params.GPmin[i] * U[i, h],
                     )
                 end
                 for h in 1:(UCHorizon-1)
                     set_normalized_rhs(
                         ucpmodel[:RU][i, h],
-                        GRU[i] + GPmin[i] * V[i, h+1],
+                        params.GRU[i] + params.GPmin[i] * V[i, h+1],
                     )
                     set_normalized_rhs(
                         ucpmodel[:RD][i, h],
-                        GRD[i] + GPmin[i] * W[i, h+1],
+                        params.GRD[i] + params.GPmin[i] * W[i, h+1],
                     )
                 end
                 set_normalized_rhs(
                     ucpmodel[:RUIni][i],
-                    GRU[i] + GPmin[i] * V[i, 1] + GPini[i],
+                    params.GRU[i] + params.GPmin[i] * V[i, 1] + GPIniInput[i],
                 )
                 set_normalized_rhs(
                     ucpmodel[:RDIni][i],
-                    GRD[i] + GPmin[i] * W[i, 1] - GPini[i],
+                    params.GRD[i] + params.GPmin[i] * W[i, 1] - GPIniInput[i],
                 )
             end
 
@@ -322,62 +311,67 @@ function solving(
             for h in 1:24
                 for t in 1:EDSteps
                     ts = ((d - 1) * 24 + h - 1) * EDSteps + t # time step
-                    EDLInput =
-                        convert(Matrix{Float64}, EDL[ts:ts+EDHorizon-1, :]')
+                    EDLInput = convert(
+                        Matrix{Float64},
+                        params.EDL[ts:ts+EDHorizon-1, :]',
+                    )
                     EDHAvailInput = convert(
                         Matrix{Float64},
-                        EDHAvail[ts:ts+EDHorizon-1, :]',
+                        params.EDHAvail[ts:ts+EDHorizon-1, :]',
                     )
                     EDRAvailInput = convert(
                         Matrix{Float64},
-                        EDRAvail[ts:ts+EDHorizon-1, :]',
+                        params.EDRAvail[ts:ts+EDHorizon-1, :]',
                     )
                     for tp in 1:EDHorizon
                         # Ad hoc method to solve initial generation output for ED model
                         if ts == 1 && tp == 1
                             # if h == 1 && t == 1 && tp == 1
-                            for i in axes(GPini, 1)
+                            for i in axes(params.GPIni, 1)
                                 set_normalized_rhs(
                                     edmodel[:RUIni][i],
-                                    GPini[i] +
-                                    GRU[i] +
-                                    (GPmin[i]) * EDV[i, (h-1)*EDSteps+t+tp-1],
+                                    params.GPIni[i] +
+                                    params.GRU[i] +
+                                    (params.GPmin[i]) *
+                                    EDV[i, (h-1)*EDSteps+t+tp-1],
                                 )
                                 set_normalized_rhs(
                                     edmodel[:RDIni][i],
-                                    -GPini[i] +
-                                    GRD[i] +
-                                    (GPmin[i]) * EDW[i, (h-1)*EDSteps+t+tp-1],
+                                    -params.GPIni[i] +
+                                    params.GRD[i] +
+                                    (params.GPmin[i]) *
+                                    EDW[i, (h-1)*EDSteps+t+tp-1],
                                 )
                                 # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
                                 # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
                             end
                         elseif h == 1 && t == 1 && tp == 1
-                            for i in axes(GPini, 1)
+                            for i in axes(params.GPIni, 1)
                                 set_normalized_rhs(
                                     edmodel[:RUIni][i],
-                                    EDGPini[i] +
-                                    GRU[i] / EDSteps +
-                                    (GPmin[i]) * EDV[i, 1],
+                                    EDGPIni[i] +
+                                    params.GRU[i] / EDSteps +
+                                    (params.GPmin[i]) * EDV[i, 1],
                                 )
                                 set_normalized_rhs(
                                     edmodel[:RDIni][i],
-                                    -EDGPini[i] +
-                                    GRD[i] / EDSteps +
-                                    (GPmax[i]) * EDW[i, 1],
+                                    -EDGPIni[i] +
+                                    params.GRD[i] / EDSteps +
+                                    (params.GPmax[i]) * EDW[i, 1],
                                 )
                                 # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
                                 # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
                             end
                             # TODO
-                            for i in axes(ESOCini, 1)
+                            for i in axes(params.ESOCini, 1)
                                 set_normalized_rhs(
                                     edmodel[:StorageSOCIni][i],
-                                    ESOCini[i],
+                                    params.ESOCini[i],
                                 )
                             end
                         end
                         for i in axes(RTDBids, 1)
+                            # if d == 1
                             set_objective_coefficient(
                                 edmodel,
                                 edmodel[:d][i, tp],
@@ -388,6 +382,19 @@ function solving(
                                 edmodel[:c][i, tp],
                                 -RTCBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
                             )
+                            # else
+                            #     # TODO bid base on models
+                            #     set_objective_coefficient(
+                            #         edmodel,
+                            #         edmodel[:d][i, tp],
+                            #         RTDBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
+                            #     )
+                            #     set_objective_coefficient(
+                            #         edmodel,
+                            #         edmodel[:c][i, tp],
+                            #         -RTCBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
+                            #     )
+                            # end
                         end
                         for z in axes(EDLInput, 1)
                             set_normalized_rhs(
@@ -398,15 +405,15 @@ function solving(
                         for i in axes(U, 1)
                             set_normalized_rhs(
                                 edmodel[:UCCapU][i, tp],
-                                EDU[i, (h-1)*EDSteps+t+tp-1] * GPmax[i],
+                                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmax[i],
                             )
                             set_normalized_rhs(
                                 edmodel[:UCCapL][i, tp],
-                                EDU[i, (h-1)*EDSteps+t+tp-1] * GPmin[i],
+                                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmin[i],
                             )
                             set_normalized_rhs(
                                 edmodel[:UCGenSeg1][i, tp],
-                                EDU[i, (h-1)*EDSteps+t+tp-1] * GPmin[i],
+                                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmin[i],
                             )
                         end
                         for i in axes(EDHAvailInput, 1)
@@ -422,18 +429,20 @@ function solving(
                             )
                         end
                         if EDHorizon > 1 && tp > 1
-                            for i in axes(GPini, 1)
+                            for i in axes(params.GPIni, 1)
                                 set_normalized_rhs(
                                     edmodel[:RU][i, tp],
-                                    GRU[i] / EDSteps +
-                                    GPmin[i] * EDV[i, (h-1)*EDSteps+t+tp-1],
+                                    params.GRU[i] / EDSteps +
+                                    params.GPmin[i] *
+                                    EDV[i, (h-1)*EDSteps+t+tp-1],
                                 )
                             end
-                            for i in axes(GPini, 1)
+                            for i in axes(params.GPIni, 1)
                                 set_normalized_rhs(
                                     edmodel[:RD][i, tp],
-                                    GRD[i] / EDSteps +
-                                    GPmax[i] * EDW[i, (h-1)*EDSteps+t+tp-1],
+                                    params.GRD[i] / EDSteps +
+                                    params.GPmax[i] *
+                                    EDW[i, (h-1)*EDSteps+t+tp-1],
                                 )
                             end
                         end
@@ -443,7 +452,8 @@ function solving(
                     # # Extract solution
                     if termination_status(edmodel) == MOI.OPTIMAL
                         EDGMCcost[ts] =
-                            sum(value.(edmodel[:guc])[:, 1] .* GMC) / EDSteps
+                            sum(value.(edmodel[:guc])[:, 1] .* params.GMC) /
+                            EDSteps
                         EDGSMCcost[ts] =
                             sum(
                                 value.(edmodel[:gucs])[:, :, 1] .*
@@ -465,11 +475,12 @@ function solving(
                             EDVOLL[ts] +
                             EDEScost[ts] +
                             sum(
-                                EDU[:, (h-1)*EDSteps+t] .* GNLC / EDSteps +
-                                EDV[:, (h-1)*EDSteps+t] .* GSUC,
+                                EDU[:, (h-1)*EDSteps+t] .* params.GNLC /
+                                EDSteps +
+                                EDV[:, (h-1)*EDSteps+t] .* params.GSUC,
                             )
-                        EDGPini = value.(edmodel[:guc])[:, 1]
-                        EDGdf = DataFrame(EDGPini', :auto)
+                        EDGPIni = value.(edmodel[:guc])[:, 1]
+                        EDGdf = DataFrame(EDGPIni', :auto)
                         CSV.write(
                             joinpath(output_folder, "EDGen.csv"),
                             EDGdf,
@@ -518,7 +529,7 @@ function solving(
                             append = true,
                         )
                         EDGZone = DataFrame(
-                            value.(edmodel[:guc])[:, 1]' * genmap,
+                            value.(edmodel[:guc])[:, 1]' * params.genmap,
                             :auto,
                         )
                         CSV.write(
@@ -527,7 +538,7 @@ function solving(
                             append = true,
                         )
                         EDHydroZone = DataFrame(
-                            value.(edmodel[:gh])[:, 1]' * hydromap,
+                            value.(edmodel[:gh])[:, 1]' * params.hydromap,
                             :auto,
                         )
                         CSV.write(
@@ -536,7 +547,7 @@ function solving(
                             append = true,
                         )
                         EDRenewableZone = DataFrame(
-                            value.(edmodel[:gr])[:, 1]' * renewablemap,
+                            value.(edmodel[:gr])[:, 1]' * params.renewablemap,
                             :auto,
                         )
                         CSV.write(
@@ -545,7 +556,7 @@ function solving(
                             append = true,
                         )
                         EDSOCZone = DataFrame(
-                            value.(edmodel[:e])[:, 1]' * storagemap,
+                            value.(edmodel[:e])[:, 1]' * params.storagemap,
                             :auto,
                         )
                         CSV.write(
@@ -554,19 +565,19 @@ function solving(
                             append = true,
                         )
                         # Update initial generation output for next time step
-                        for i in axes(GPini, 1)
+                        for i in axes(params.GPIni, 1)
                             # if (h - 1) * EDSteps + t != UCHorizon * EDSteps
                             set_normalized_rhs(
                                 edmodel[:RUIni][i],
-                                EDGPini[i] +
-                                GRU[i] / EDSteps +
-                                (GPmin[i]) * EDV[i, (h-1)*EDSteps+t+1],
+                                EDGPIni[i] +
+                                params.GRU[i] / EDSteps +
+                                (params.GPmin[i]) * EDV[i, (h-1)*EDSteps+t+1],
                             )
                             set_normalized_rhs(
                                 edmodel[:RDIni][i],
-                                -EDGPini[i] +
-                                GRD[i] / EDSteps +
-                                (GPmax[i]) * EDW[i, (h-1)*EDSteps+t+1],
+                                -EDGPIni[i] +
+                                params.GRD[i] / EDSteps +
+                                (params.GPmax[i]) * EDW[i, (h-1)*EDSteps+t+1],
                             )
                             # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i] + GPmin[i]*EDV[i,(h - 1) * EDSteps + t + 1])
                             # set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i] + GPmin[i]*EDW[i,(h - 1) * EDSteps + t + 1])
@@ -590,23 +601,24 @@ function solving(
                     end
                     # Update initial generation output for next day
                     if h == 24 && t == 1
-                        for i in axes(GPini, 1)
+                        GPIniInput = EDGPIni
+                        for i in axes(params.GPIni, 1)
                             set_normalized_rhs(
                                 ucmodel[:RUIni][i],
-                                EDGPini[i] + GRU[i],
+                                EDGPIni[i] + params.GRU[i],
                             )
                             set_normalized_rhs(
                                 ucmodel[:RDIni][i],
-                                -EDGPini[i] + GRD[i],
+                                -EDGPIni[i] + params.GRD[i],
                             )
-                            set_normalized_rhs(
-                                ucpmodel[:RUIni][i],
-                                EDGPini[i] + GRU[i],
-                            )
-                            set_normalized_rhs(
-                                ucpmodel[:RDIni][i],
-                                -EDGPini[i] + GRD[i],
-                            )
+                            # set_normalized_rhs(
+                            #     ucpmodel[:RUIni][i],
+                            #     EDGPini[i] + GRU[i],
+                            # )
+                            # set_normalized_rhs(
+                            #     ucpmodel[:RDIni][i],
+                            #     -EDGPini[i] + GRD[i],
+                            # )
                         end
 
                         # TODO: update initial storage SOC

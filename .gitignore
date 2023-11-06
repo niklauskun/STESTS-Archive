@@ -1,10 +1,10 @@
-
+2032 ADS PCM V2.4.1 Public Data/
+output/
 data/ADS2032.jld2
 data/WECC240.jld2
 data/ADS2032_Noise.jld2
 *.jld2
 data/WECC240.jld2
-*.csv
 2032 ADS PCM V2.4.1 Public Data/.ipynb_checkpoints/ADS_Preprocessing_CurrentMiX-checkpoint.ipynb
 2032 ADS PCM V2.4.1 Public Data/.ipynb_checkpoints/K-means RTD noise-checkpoint.ipynb
 2032 ADS PCM V2.4.1 Public Data/.ipynb_checkpoints/K-means RTD noise_Current-checkpoint.ipynb
@@ -22,3 +22,4 @@ output/archive-noendsoc/1MO_R_RM0.03VOLL9000/.DS_Store
 2032 ADS PCM V2.4.1 Public Data/Public Data/.DS_Store
 2032 ADS PCM V2.4.1 Public Data/RTD/.DS_Store
 2032 ADS PCM V2.4.1 Public Data/Input_Data_WECC240.xlsx
+2032 ADS PCM V2.4.1 Public Data/DAM/Load/20211231_20220131_SLD_FCST_DAM.csv

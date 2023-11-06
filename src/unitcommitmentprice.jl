@@ -11,52 +11,27 @@ unitcommitment(L::Matrix{Float64})::JuMP.Model -> Multi-bus ucmodel
 unitcommitment(L::Vector{Float64})::JuMP.Model -> Single-bus ucmodel
 """
 function unitcommitmentprice(
-    UCL::Matrix{Float64}, # Load
-    genmap::Matrix{Int64}, # generator map
-    GPmax::Vector{Float64}, # generator maximum output
-    GPmin::Vector{Float64}, # generator minimum output
-    GMustRun::Vector{Int64}, # generator must-run status
-    GMC::Vector{Float64}, # generator marginal cost
-    GSMC::Array{Float64,3}, # generator segment marginal cost
-    GINCPmax::Matrix{Float64}, # maximum power output of generator segments
-    transmap::Matrix{Int64}, # transmission map
-    TX::Vector{Float64}, # transmission reactance
-    TFmax::Vector{Float64}, # transmission maximum flow,
-    GNLC::Vector{Float64}, # generator non-load-carrying cost
-    GRU::Vector{Float64}, # generator ramp up rate
-    GRD::Vector{Float64}, # generator ramp down rate
-    GSUC::Vector{Float64}, # generator start-up cost
-    GUT::Vector{Int64}, # generator minimum up time
-    GDT::Vector{Int64}, # generator minimum down time
-    GPini::Vector{Float64}, # generator initial output
-    SU::Vector{Int64}, # generator must on time
-    SD::Vector{Int64}, # generator must down time
-    UInput::Vector{Int64}, # Conventional generator status, 1 if on, 0 if off
-    hydromap::Matrix{Int64}, # hydro map
-    HAvail::Matrix{Float64}, # hydro availability
-    renewablemap::Matrix{Int64}, # renewable map
-    RAvail::Matrix{Float64}, # renewable availability
-    storagemap::Matrix{Int64}, # storage map
-    EPC::Vector{Float64}, # storage charging capacity
-    EPD::Vector{Float64}, # storage discharging capacity
-    Eeta::Vector{Float64}, # storage efficiency
-    ESOC::Vector{Float64}, # storage state of charge capacity
-    ESOCini::Vector{Float64}; # storage initial state of charge
+    params::STESTS.ModelParams;
     Horizon::Int = 24, # planning horizon
     VOLL::Float64 = 1000.0, # value of lost load
     RM::Float64 = 0.03, # reserve margin
 )::JuMP.Model
+    GSMC = repeat(params.GSMC, outer = (1, 1, Horizon))
+    UCL = convert(Matrix{Float64}, params.UCL[1:Horizon, :]')
+    HAvail = convert(Matrix{Float64}, params.HAvail[1:Horizon, :]')
+    RAvail = convert(Matrix{Float64}, params.RAvail[1:Horizon, :]')
+
     ntimepoints = Horizon # number of time points
     nbus = size(UCL, 1) # number of buses
-    ntrans = size(transmap, 1) # number of transmission lines
-    nucgen = size(genmap, 1) # number of conventional generators
+    ntrans = size(params.transmap, 1) # number of transmission lines
+    nucgen = size(params.genmap, 1) # number of conventional generators
     ngucs = size(GSMC, 2) # number of generator segments
-    nhydro = size(hydromap, 1) # number of hydro generators
-    nrenewable = size(renewablemap, 1) # number of renewable generators
-    nstorage = size(storagemap, 1) # number of storage units
-    U = zeros(Int, size(GPini, 1), Horizon)
-    V = zeros(Int, size(GPini, 1), Horizon)
-    W = zeros(Int, size(GPini, 1), Horizon)
+    nhydro = size(params.hydromap, 1) # number of hydro generators
+    nrenewable = size(params.renewablemap, 1) # number of renewable generators
+    nstorage = size(params.storagemap, 1) # number of storage units
+    U = zeros(Int, size(params.GPIni, 1), Horizon)
+    V = zeros(Int, size(params.GPIni, 1), Horizon)
+    W = zeros(Int, size(params.GPIni, 1), Horizon)
 
     # Define model
     ucpmodel = Model()
@@ -78,7 +53,7 @@ function unitcommitmentprice(
     @objective(
         ucpmodel,
         Min,
-        sum(GMC .* guc) +
+        sum(params.GMC .* guc) +
         sum(GSMC .* gucs) +
         sum(300.0 .* d - 0.0 .* c) +
         sum(VOLL .* s)
@@ -88,11 +63,12 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         LoadBalance[z = 1:nbus, h = 1:ntimepoints],
-        sum(genmap[:, z] .* guc[:, h]) +
-        sum(hydromap[:, z] .* gh[:, h]) +
-        sum(renewablemap[:, z] .* gr[:, h]) +
-        sum(storagemap[:, z] .* d[:, h]) - sum(storagemap[:, z] .* c[:, h]) +
-        sum(transmap[:, z] .* f[:, h]) +
+        sum(params.genmap[:, z] .* guc[:, h]) +
+        sum(params.hydromap[:, z] .* gh[:, h]) +
+        sum(params.renewablemap[:, z] .* gr[:, h]) +
+        sum(params.storagemap[:, z] .* d[:, h]) -
+        sum(params.storagemap[:, z] .* c[:, h]) +
+        sum(params.transmap[:, z] .* f[:, h]) +
         s[z, h] == UCL[z, h]
     )
 
@@ -108,13 +84,13 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         UnitReserve1[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= GPmax[i] * U[i, h] - guc[i, h]
+        grr[i, h] <= params.GPmax[i] * U[i, h] - guc[i, h]
     )
 
     @constraint(
         ucpmodel,
         UnitReserve2[i = 1:nucgen, h = 1:ntimepoints],
-        grr[i, h] <= GRU[i] / 6
+        grr[i, h] <= params.GRU[i] / 6
     )
 
     @constraint(
@@ -127,12 +103,12 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         TXCapTo[l = 1:ntrans, h = 1:ntimepoints],
-        f[l, h] <= TFmax[l]
+        f[l, h] <= params.TFmax[l]
     )
     @constraint(
         ucpmodel,
         TXCapFrom[l = 1:ntrans, h = 1:ntimepoints],
-        f[l, h] >= -TFmax[l]
+        f[l, h] >= -params.TFmax[l]
     )
 
     # # DCOPF constraints
@@ -142,9 +118,9 @@ function unitcommitmentprice(
         ucpmodel,
         DCOPTX[l = 1:ntrans, h = 1:ntimepoints],
         f[l, h] ==
-        TX[l] * (
-            θ[(findfirst(x -> x == 1, transmap[l, :])), h] -
-            θ[(findfirst(x -> x == -1, transmap[l, :])), h]
+        params.TX[l] * (
+            θ[(findfirst(x -> x == 1, params.transmap[l, :])), h] -
+            θ[(findfirst(x -> x == -1, params.transmap[l, :])), h]
         )
     )
 
@@ -152,39 +128,41 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         StorageCharge[i = 1:nstorage, h = 1:ntimepoints],
-        c[i, h] <= EPC[i]
+        c[i, h] <= params.EPC[i]
     )
 
     @constraint(
         ucpmodel,
         StorageDischarge[i = 1:nstorage, h = 1:ntimepoints],
-        d[i, h] <= EPD[i]
+        d[i, h] <= params.EPD[i]
     )
 
     # Storage energy level constraints
     @constraint(
         ucpmodel,
         StorageSOCCap[i = 1:nstorage, h = 1:ntimepoints],
-        e[i, h] <= ESOC[i]
+        e[i, h] <= params.ESOC[i]
     )
 
     # Storage SOC evolution constraints
     @constraint(
         ucpmodel,
         StorageSOCIni[i = 1:nstorage],
-        e[i, 1] == ESOCini[i] + c[i, 1] * Eeta[i] - d[i, 1] / Eeta[i]
+        e[i, 1] ==
+        params.ESOCini[i] + c[i, 1] * params.Eeta[i] - d[i, 1] / params.Eeta[i]
     )
 
     @constraint(
         ucpmodel,
         StorageSOC[i = 1:nstorage, h = 2:ntimepoints],
-        e[i, h] == e[i, h-1] + c[i, h] * Eeta[i] - d[i, h] / Eeta[i]
+        e[i, h] ==
+        e[i, h-1] + c[i, h] * params.Eeta[i] - d[i, h] / params.Eeta[i]
     )
 
     @constraint(
         ucpmodel,
         StorageSOCEnd[i = 1:nstorage, h = 1:ntimepoints; h % 24 == 0],  # Apply constraint for every h divisible by 24
-        e[i, h] >= ESOCini[i]
+        e[i, h] >= params.ESOCini[i]
     )
 
     # Conventional generator must run constraints
@@ -198,25 +176,25 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         UCGenSeg1[i = 1:nucgen, h = 1:ntimepoints],
-        guc[i, h] == U[i, h] * GPmin[i] + sum(gucs[i, :, h])
+        guc[i, h] == U[i, h] * params.GPmin[i] + sum(gucs[i, :, h])
     )
 
     @constraint(
         ucpmodel,
         UCGenSeg2[i = 1:nucgen, j = 1:ngucs, h = 1:ntimepoints],
-        gucs[i, j, h] <= GINCPmax[i, j]
+        gucs[i, j, h] <= params.GINCPmax[i, j]
     )
 
     # Conventional generator capacity limits
     @constraint(
         ucpmodel,
         UCCapU[i = 1:nucgen, h = 1:Horizon],
-        guc[i, h] <= U[i, h] * GPmax[i]
+        guc[i, h] <= U[i, h] * params.GPmax[i]
     )
     @constraint(
         ucpmodel,
         UCCapL[i = 1:nucgen, h = 1:Horizon],
-        guc[i, h] >= U[i, h] * GPmin[i]
+        guc[i, h] >= U[i, h] * params.GPmin[i]
     )
     # Hydro and renewable capacity limits
     @constraint(
@@ -245,22 +223,24 @@ function unitcommitmentprice(
     @constraint(
         ucpmodel,
         RUIni[i = 1:nucgen],
-        guc[i, 1] - GPini[i] <= GRU[i] + GPmin[i] * V[i, 1]
+        guc[i, 1] - params.GPIni[i] <=
+        params.GRU[i] + params.GPmin[i] * V[i, 1]
     )
     @constraint(
         ucpmodel,
         RDIni[i = 1:nucgen],
-        GPini[i] - guc[i, 1] <= GRD[i] + GPmin[i] * W[i, 1]
+        params.GPIni[i] - guc[i, 1] <=
+        params.GRD[i] + params.GPmin[i] * W[i, 1]
     )
     @constraint(
         ucpmodel,
         RU[i = 1:nucgen, h = 1:Horizon-1],
-        guc[i, h+1] - guc[i, h] <= GRU[i] + GPmin[i] * V[i, h+1]
+        guc[i, h+1] - guc[i, h] <= params.GRU[i] + params.GPmin[i] * V[i, h+1]
     )
     @constraint(
         ucpmodel,
         RD[i = 1:nucgen, h = 1:Horizon-1],
-        guc[i, h] - guc[i, h+1] <= GRD[i] + GPmin[i] * W[i, h+1]
+        guc[i, h] - guc[i, h+1] <= params.GRD[i] + params.GPmin[i] * W[i, h+1]
     )
 
     # State transition constraints
