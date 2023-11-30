@@ -19,7 +19,9 @@ function unitcommitment(
     GSMC = repeat(params.GSMC, outer = (1, 1, Horizon))
     UCL = convert(Matrix{Float64}, params.UCL[1:Horizon, :]')
     HAvail = convert(Matrix{Float64}, params.HAvail[1:Horizon, :]')
-    RAvail = convert(Matrix{Float64}, params.RAvail[1:Horizon, :]')
+    # RAvail = convert(Matrix{Float64}, params.RAvail[1:Horizon, :]')
+    SAvail = convert(Matrix{Float64}, params.SAvail[1:Horizon, :]')
+    WAvail = convert(Matrix{Float64}, params.WAvail[1:Horizon, :]')
     UInput = convert(Array{Int64,1}, params.GPIni .!= 0)
     SU = zeros(Int, size(params.GPIni, 1)) # initial generator must on time
     SD = zeros(Int, size(params.GPIni, 1)) # initial generator down on time
@@ -30,7 +32,7 @@ function unitcommitment(
     nucgen = size(params.genmap, 1) # number of conventional generators
     ngucs = size(GSMC, 2) # number of generator segments
     nhydro = size(params.hydromap, 1) # number of hydro generators
-    nrenewable = size(params.renewablemap, 1) # number of renewable generators
+    # nrenewable = size(params.renewablemap, 1) # number of renewable generators
     nstorage = size(params.storagemap, 1) # number of storage units
 
     # Define model
@@ -44,7 +46,9 @@ function unitcommitment(
     @variable(ucmodel, v[1:nucgen, 1:ntimepoints], Bin) # Conventional generator start-up decision, 1 if start-up, 0 otherwise
     @variable(ucmodel, w[1:nucgen, 1:ntimepoints], Bin) # Conventional generator shut-down decision, 1 if shut-down, 0 otherwise
     @variable(ucmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
-    @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
+    # @variable(ucmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
+    @variable(ucmodel, gs[1:nbus, 1:ntimepoints] >= 0) # Solar output
+    @variable(ucmodel, gw[1:nbus, 1:ntimepoints] >= 0) # Wind output
     @variable(ucmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
     @variable(ucmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
     @variable(ucmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
@@ -63,12 +67,24 @@ function unitcommitment(
     )
 
     # Bus wise load balance constraints with transmission
+    # @constraint(
+    #     ucmodel,
+    #     LoadBalance[z = 1:nbus, h = 1:ntimepoints],
+    #     sum(params.genmap[:, z] .* guc[:, h]) +
+    #     sum(params.hydromap[:, z] .* gh[:, h]) +
+    #     sum(params.renewablemap[:, z] .* gr[:, h]) +
+    #     sum(params.storagemap[:, z] .* d[:, h]) -
+    #     sum(params.storagemap[:, z] .* c[:, h]) +
+    #     sum(params.transmap[:, z] .* f[:, h]) +
+    #     s[z, h] == UCL[z, h]
+    # )
     @constraint(
         ucmodel,
         LoadBalance[z = 1:nbus, h = 1:ntimepoints],
         sum(params.genmap[:, z] .* guc[:, h]) +
         sum(params.hydromap[:, z] .* gh[:, h]) +
-        sum(params.renewablemap[:, z] .* gr[:, h]) +
+        gs[z, h] +
+        gw[z, h] +
         sum(params.storagemap[:, z] .* d[:, h]) -
         sum(params.storagemap[:, z] .* c[:, h]) +
         sum(params.transmap[:, z] .* f[:, h]) +
@@ -205,10 +221,20 @@ function unitcommitment(
         HCap[i = 1:nhydro, h = 1:Horizon],
         gh[i, h] <= HAvail[i, h]
     )
+    # @constraint(
+    #     ucmodel,
+    #     ReCap[i = 1:nrenewable, h = 1:Horizon],
+    #     gr[i, h] <= RAvail[i, h]
+    # )
     @constraint(
         ucmodel,
-        ReCap[i = 1:nrenewable, h = 1:Horizon],
-        gr[i, h] <= RAvail[i, h]
+        SCap[z = 1:nbus, h = 1:Horizon],
+        gs[z, h] <= SAvail[z, h]
+    )
+    @constraint(
+        ucmodel,
+        WCap[z = 1:nbus, h = 1:Horizon],
+        gw[z, h] <= WAvail[z, h]
     )
     # Ramping limits
     # @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])

@@ -6,8 +6,8 @@ using Interpolations
 
 RealTimeNoise = true
 CurrentMix = true
-TransmissionCap = false
-DataName = "./data/ADS2032_Noise_C_ESC.jld2"
+TransmissionCap = true
+DataName = "./data/ADS2032_7RegionNoise.jld2"
 folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
 
 @info "Reading data from $folder..."
@@ -28,23 +28,11 @@ timereaddata = @elapsed begin
     @assert length(TX) == length(TFmax) == size(transmap, 1) "Transmission data length mismatch."
 
     # read generator data
-    if CurrentMix == true
-        genmap = Matrix(
-            CSV.read(joinpath(folder, "ThermalGenMap_C.csv"), DataFrame)[
-                :,
-                2:end,
-            ],
-        ) # read generator map
-        gendata = CSV.read(joinpath(folder, "ThermalGen_C.csv"), DataFrame)
-    else
-        genmap = Matrix(
-            CSV.read(joinpath(folder, "ThermalGenMap.csv"), DataFrame)[
-                :,
-                2:end,
-            ],
-        ) # read generator map
-        gendata = CSV.read(joinpath(folder, "ThermalGen.csv"), DataFrame)
-    end
+    genmap = Matrix(
+        CSV.read(joinpath(folder, "ThermalGenMap_C.csv"), DataFrame)[:, 2:end],
+    ) # read generator map
+    gendata = CSV.read(joinpath(folder, "ThermalGen_C.csv"), DataFrame)
+
     GPmax = gendata[!, :"IOMaxCap(MW)"] # read generator maximum capacity, in MW
     GPmin = gendata[!, :"IOMinCap(MW)"] # read generator minimum capacity, in MW
     GMustRun = gendata[!, :"MustRun"] # read generator must run status
@@ -76,26 +64,14 @@ timereaddata = @elapsed begin
             size(genmap, 1) "Generator data length mismatch."
 
     # read hydro data
-    if CurrentMix == true
-        hydromap = Matrix(
-            CSV.read(joinpath(folder, "HydroMap_C.csv"), DataFrame)[:, 2:end],
-        ) # read hydro map
-        hydrodata = CSV.read(joinpath(folder, "Hydro_C.csv"), DataFrame)
-        HAvail = Matrix(
-            CSV.read(joinpath(folder, "HydroProfile_C.csv"), DataFrame)[
-                :,
-                2:end,
-            ],
-        ) # read hydro availability, in MW
-    else
-        hydromap = Matrix(
-            CSV.read(joinpath(folder, "HydroMap.csv"), DataFrame)[:, 2:end],
-        ) # read hydro map
-        hydrodata = CSV.read(joinpath(folder, "Hydro.csv"), DataFrame)
-        HAvail = Matrix(
-            CSV.read(joinpath(folder, "HydroProfile.csv"), DataFrame)[:, 2:end],
-        ) # read hydro availability, in MW
-    end
+    hydromap = Matrix(
+        CSV.read(joinpath(folder, "HydroMap_C.csv"), DataFrame)[:, 2:end],
+    ) # read hydro map
+    hydrodata = CSV.read(joinpath(folder, "Hydro_C.csv"), DataFrame)
+    HAvail = Matrix(
+        CSV.read(joinpath(folder, "HydroProfile_C.csv"), DataFrame)[:, 2:end],
+    ) # read hydro availability, in MW
+
     HPmax = hydrodata[!, :"MaxCap(MW)"] # read hydro maximum capacity, in MW    
     HPmin = hydrodata[!, :"MinCap(MW)"] # read hydro minimum capacity, in MW
     # HAvail value less than HPmin, set to HPmin, value greater than HPmax, set to HPmax
@@ -117,79 +93,57 @@ timereaddata = @elapsed begin
             size(HAvail, 2) "Hydro data length mismatch."
 
     # read renewable data
-    if CurrentMix == true
-        solarmap = Matrix(
-            CSV.read(joinpath(folder, "SolarMap_C.csv"), DataFrame)[:, 2:end],
-        )
-        windmap = Matrix(
-            CSV.read(joinpath(folder, "WindMap_C.csv"), DataFrame)[:, 2:end],
-        )
-        solarprofile = Matrix(
-            CSV.read(joinpath(folder, "SolarProfile_C.csv"), DataFrame)[
-                :,
-                2:end,
-            ],
-        )
-        windprofile = Matrix(
-            CSV.read(joinpath(folder, "WindProfile_C.csv"), DataFrame)[
-                :,
-                2:end,
-            ],
-        )
-        solardata = CSV.read(joinpath(folder, "Solar_C.csv"), DataFrame)
-        winddata = CSV.read(joinpath(folder, "Wind_C.csv"), DataFrame)
-    else
-        solarmap = Matrix(
-            CSV.read(joinpath(folder, "SolarMap.csv"), DataFrame)[:, 2:end],
-        )
-        windmap = Matrix(
-            CSV.read(joinpath(folder, "WindMap.csv"), DataFrame)[:, 2:end],
-        )
-        solarprofile = Matrix(
-            CSV.read(joinpath(folder, "SolarProfile.csv"), DataFrame)[:, 2:end],
-        )
-        windprofile = Matrix(
-            CSV.read(joinpath(folder, "WindProfile.csv"), DataFrame)[:, 2:end],
-        )
-        solardata = CSV.read(joinpath(folder, "Solar.csv"), DataFrame)
-        winddata = CSV.read(joinpath(folder, "Wind.csv"), DataFrame)
-    end
-    solarPmax = solardata[!, :"Capacity(MW)"] # read solar maximum capacity, in MW
-    windPmax = winddata[!, :"Capacity(MW)"] # read wind maximum capacity, in MW
-    renewablemap = vcat(solarmap, windmap)
-    RPmax = vcat(solarPmax, windPmax)
-    RAvail = hcat(solarprofile, windprofile)
-    #     renewablemap = XLSX.readdata(filename, "TotalRenewable", "G3:IL61") # read renewable map
-    #     RPmax = vec(XLSX.readdata(filename, "TotalRenewable!B3:B61")) # read renewable maximum capacity, in MW
-    #     RPmin = vec(XLSX.readdata(filename, "TotalRenewable!D3:D61")) # read renewable minimum capacity, in MW
-    #     RAvail = XLSX.readdata(filename, "TotalRenewable!JD3:LJ8786") # read renewable availability, in MW
-    #     # RAvail value less than RPmin, set to RPmin, value greater than RPmax, set to RPmax
-    #     for columns in axes(RAvail, 2)
-    #         for rows in axes(RAvail, 1)
-    #             if RAvail[rows, columns] < RPmin[columns]
-    #                 RAvail[rows, columns] = RPmin[columns]
-    #                 @info "Renewable availability less than minimum capacity at row $rows, column $columns."
-    #             elseif RAvail[rows, columns] > RPmax[columns]
-    #                 RAvail[rows, columns] = RPmax[columns]
-    #                 @info "Renewable availability less than minimum capacity at row $rows, column $columns."
-    #             end
+    # solarmap = Matrix(
+    #     CSV.read(joinpath(folder, "SolarMap_C.csv"), DataFrame)[:, 2:end],
+    # )
+    # windmap = Matrix(
+    #     CSV.read(joinpath(folder, "WindMap_C.csv"), DataFrame)[:, 2:end],
+    # )
+    # solarprofile = Matrix(
+    #     CSV.read(joinpath(folder, "SolarProfile_C.csv"), DataFrame)[:, 2:end],
+    # )
+    # windprofile = Matrix(
+    #     CSV.read(joinpath(folder, "WindProfile_C.csv"), DataFrame)[:, 2:end],
+    # )
+    # solardata = CSV.read(joinpath(folder, "Solar_C.csv"), DataFrame)
+    # winddata = CSV.read(joinpath(folder, "Wind_C.csv"), DataFrame)
+
+    # solarPmax = solardata[!, :"Capacity(MW)"] # read solar maximum capacity, in MW
+    # windPmax = winddata[!, :"Capacity(MW)"] # read wind maximum capacity, in MW
+    # renewablemap = vcat(solarmap, windmap)
+    # RPmax = vcat(solarPmax, windPmax)
+    # RAvail = hcat(solarprofile, windprofile)
+    # renewablemap = XLSX.readdata(filename, "TotalRenewable", "G3:IL61") # read renewable map
+    # RPmax = vec(XLSX.readdata(filename, "TotalRenewable!B3:B61")) # read renewable maximum capacity, in MW
+    # RPmin = vec(XLSX.readdata(filename, "TotalRenewable!D3:D61")) # read renewable minimum capacity, in MW
+    # RAvail = XLSX.readdata(filename, "TotalRenewable!JD3:LJ8786") # read renewable availability, in MW
+    # # RAvail value less than RPmin, set to RPmin, value greater than RPmax, set to RPmax
+    # for columns in axes(RAvail, 2)
+    #     for rows in axes(RAvail, 1)
+    #         if RAvail[rows, columns] < RPmin[columns]
+    #             RAvail[rows, columns] = RPmin[columns]
+    #             @info "Renewable availability less than minimum capacity at row $rows, column $columns."
+    #         elseif RAvail[rows, columns] > RPmax[columns]
+    #             RAvail[rows, columns] = RPmax[columns]
+    #             @info "Renewable availability less than minimum capacity at row $rows, column $columns."
     #         end
     #     end
-    @assert length(RPmax) == size(renewablemap, 1) == size(RAvail, 2) "Renewable data length mismatch."
+    # end
+    # @assert length(RPmax) == size(renewablemap, 1) == size(RAvail, 2) "Renewable data length mismatch."
+
+    SAvail = Matrix(
+        CSV.read(joinpath(folder, "SolarZone_C.csv"), DataFrame)[:, 2:end],
+    )
+    WAvail = Matrix(
+        CSV.read(joinpath(folder, "WindZone_C.csv"), DataFrame)[:, 2:end],
+    )
 
     # read storage data
-    # TODO currently overestimate storage capacity for feasibility
-    if CurrentMix == true
-        storagemap = Matrix(
-            CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
-        )
-        storagedata = CSV.read(joinpath(folder, "Storage_C.csv"), DataFrame)
-    else
-        storagemap = Matrix(
-            CSV.read(joinpath(folder, "StorageMap.csv"), DataFrame)[:, 2:end],
-        )
-        storagedata = CSV.read(joinpath(folder, "Storage.csv"), DataFrame)
-    end
+    storagemap = Matrix(
+        CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
+    )
+    storagedata = CSV.read(joinpath(folder, "Storage_C.csv"), DataFrame)
+
     EPC = -storagedata[!, :"MinCap(MW)"] * 2.5 # read storage charge capacity, in MW
     EPD = storagedata[!, :"MaxCap(MW)"] * 2.5 # read storage discharge capacity, in MW
     Eeta = storagedata[!, :"Efficiency"] # read storage efficiency
@@ -198,17 +152,13 @@ timereaddata = @elapsed begin
     @assert length(EPC) == size(storagemap, 1) "storage data length mismatch."
 
     # read demand data
-    if CurrentMix == true
-        UCL = Matrix(CSV.read(joinpath(folder, "Load_C.csv"), DataFrame)[:, 2:end]) # read demand, in MW
-    else
-        UCL = Matrix(CSV.read(joinpath(folder, "Load.csv"), DataFrame)[:, 2:end]) # read demand, in MW
-    end
+    UCL = Matrix(CSV.read(joinpath(folder, "Load_C.csv"), DataFrame)[:, 2:end]) # read demand, in MW
+
     @assert size(transmap, 2) ==
             size(genmap, 2) ==
             size(hydromap, 2) ==
-            size(renewablemap, 2) ==
             size(UCL, 2) "Bus number mismatch."
-    @assert size(HAvail, 1) == size(RAvail, 1) == size(UCL, 1) "Time step mismatch."
+    @assert size(HAvail, 1) == size(UCL, 1) "Time step mismatch."
 
     #     # replace missing data to 0
     #     transmap = replace(transmap, missing => 0)
@@ -241,10 +191,12 @@ timereaddata = @elapsed begin
     HPmin = convert(Vector{Float64}, HPmin)
     HAvail = convert(Matrix{Float64}, HAvail)
     # HRamp = convert(Vector{Float64}, HRamp)
-    renewablemap = convert(Matrix{Int64}, renewablemap)
-    RPmax = convert(Vector{Float64}, RPmax)
+    # renewablemap = convert(Matrix{Int64}, renewablemap)
+    # RPmax = convert(Vector{Float64}, RPmax)
     # RPmin = convert(Vector{Float64}, RPmin)
-    RAvail = convert(Matrix{Float64}, RAvail)
+    # RAvail = convert(Matrix{Float64}, RAvail)
+    SAvail = convert(Matrix{Float64}, SAvail)
+    WAvail = convert(Matrix{Float64}, WAvail)
     storagemap = convert(Matrix{Int64}, storagemap)
     EPC = convert(Vector{Float64}, EPC)
     EPD = convert(Vector{Float64}, EPD)
@@ -254,21 +206,18 @@ timereaddata = @elapsed begin
     UCL = convert(Matrix{Float64}, UCL)
 
     if RealTimeNoise == true
-        if CurrentMix == true
-            EDL = Matrix(
-                CSV.read(joinpath(folder, "realtimeload_C_R.csv"), DataFrame)[
-                    :,
-                    2:end,
-                ],
-            ) # read demand, in MW
-        else
-            EDL = Matrix(
-                CSV.read(joinpath(folder, "realtimeload_R.csv"), DataFrame)[
-                    :,
-                    2:end,
-                ],
-            ) # read demand, in MW
-        end
+        EDL = Matrix(
+            CSV.read(joinpath(folder, "realtimeload_all.csv"), DataFrame)[:, :],
+        ) # read demand, in MW
+        EDSAvail = Matrix(
+            CSV.read(joinpath(folder, "realtimesolar_all.csv"), DataFrame)[
+                :,
+                :,
+            ],
+        )
+        EDWAvail = Matrix(
+            CSV.read(joinpath(folder, "realtimewind_all.csv"), DataFrame)[:, :],
+        )
     else
         EDL = zeros(105408, size(UCL, 2))
         for i in axes(UCL, 2)
@@ -283,10 +232,51 @@ timereaddata = @elapsed begin
                 EDL[j, i] = itp((j - 1) * scale + 1)
             end
         end
-    end
-    EDHAvail = zeros(105408, size(HAvail, 2))
-    EDRAvail = zeros(105408, size(RAvail, 2))
+        # EDRAvail = zeros(105408, size(RAvail, 2))
+        EDSAvail = zeros(105408, size(SAvail, 2))
+        EDWAvail = zeros(105408, size(WAvail, 2))
 
+        # for i in axes(RAvail, 2)
+        #     # Create an interpolation object for the current column
+        #     itp = interpolate(RAvail[:, i], BSpline(Linear()))
+
+        #     # Scale the interpolation to the desired number of points
+        #     scale = length(itp) / size(EDRAvail, 1)
+
+        #     # Fill the new matrix with the interpolated data
+        #     for j in 1:size(EDRAvail, 1)-12+1
+        #         EDRAvail[j, i] = itp((j - 1) * scale + 1)
+        #     end
+        # end
+
+        for i in axes(SAvail, 2)
+            # Create an interpolation object for the current column
+            itp = interpolate(SAvail[:, i], BSpline(Linear()))
+
+            # Scale the interpolation to the desired number of points
+            scale = length(itp) / size(EDSAvail, 1)
+
+            # Fill the new matrix with the interpolated data
+            for j in 1:size(EDSAvail, 1)-12+1
+                EDSAvail[j, i] = itp((j - 1) * scale + 1)
+            end
+        end
+
+        for i in axes(WAvail, 2)
+            # Create an interpolation object for the current column
+            itp = interpolate(WAvail[:, i], BSpline(Linear()))
+
+            # Scale the interpolation to the desired number of points
+            scale = length(itp) / size(EDWAvail, 1)
+
+            # Fill the new matrix with the interpolated data
+            for j in 1:size(EDWAvail, 1)-12+1
+                EDWAvail[j, i] = itp((j - 1) * scale + 1)
+            end
+        end
+    end
+
+    EDHAvail = zeros(105408, size(HAvail, 2))
     for i in axes(HAvail, 2)
         # Create an interpolation object for the current column
         itp = interpolate(HAvail[:, i], BSpline(Linear()))
@@ -297,19 +287,6 @@ timereaddata = @elapsed begin
         # Fill the new matrix with the interpolated data
         for j in 1:size(EDHAvail, 1)-12+1
             EDHAvail[j, i] = itp((j - 1) * scale + 1)
-        end
-    end
-
-    for i in axes(RAvail, 2)
-        # Create an interpolation object for the current column
-        itp = interpolate(RAvail[:, i], BSpline(Linear()))
-
-        # Scale the interpolation to the desired number of points
-        scale = length(itp) / size(EDRAvail, 1)
-
-        # Fill the new matrix with the interpolated data
-        for j in 1:size(EDRAvail, 1)-12+1
-            EDRAvail[j, i] = itp((j - 1) * scale + 1)
         end
     end
 
@@ -367,14 +344,18 @@ timereaddata = @elapsed begin
         HAvail,
         # "HRamp",
         # HRamp,
-        "renewablemap",
-        renewablemap,
-        "RPmax",
-        RPmax,
+        # "renewablemap",
+        # renewablemap,
+        # "RPmax",
+        # RPmax,
         # "RPmin",
         # RPmin,
-        "RAvail",
-        RAvail,
+        # "RAvail",
+        # RAvail,
+        "SAvail",
+        SAvail,
+        "WAvail",
+        WAvail,
         "storagemap",
         storagemap,
         "EPC",
@@ -393,8 +374,12 @@ timereaddata = @elapsed begin
         EDL,
         "EDHAvail",
         EDHAvail,
-        "EDRAvail",
-        EDRAvail,
+        # "EDRAvail",
+        # EDRAvail,
+        "EDSAvail",
+        EDSAvail,
+        "EDWAvail",
+        EDWAvail,
     )
 end
 @info "Reading data took $timereaddata seconds."

@@ -22,8 +22,10 @@ struct ModelParams
     GPIni::Vector{Float64}
     hydromap::Matrix{Int64}
     HAvail::Matrix{Float64}
-    renewablemap::Matrix{Int64}
-    RAvail::Matrix{Float64}
+    # renewablemap::Matrix{Int64}
+    # RAvail::Matrix{Float64}
+    SAvail::Matrix{Float64}
+    WAvail::Matrix{Float64}
     storagemap::Matrix{Int64}
     EPC::Vector{Float64}
     EPD::Vector{Float64}
@@ -32,7 +34,9 @@ struct ModelParams
     ESOCini::Vector{Float64}
     EDL::Matrix{Float64}
     EDHAvail::Matrix{Float64}
-    EDRAvail::Matrix{Float64}
+    # EDRAvail::Matrix{Float64}
+    EDSAvail::Matrix{Float64}
+    EDWAvail::Matrix{Float64}
 end
 
 """
@@ -69,8 +73,10 @@ function read_jld2(filename::String)
     GPIni = data["GPIni"]
     hydromap = data["hydromap"]
     HAvail = data["HAvail"]
-    renewablemap = data["renewablemap"]
-    RAvail = data["RAvail"]
+    # renewablemap = data["renewablemap"]
+    # RAvail = data["RAvail"]
+    SAvail = data["SAvail"]
+    WAvail = data["WAvail"]
     storagemap = data["storagemap"]
     EPC = data["EPC"]
     EPD = data["EPD"]
@@ -79,7 +85,9 @@ function read_jld2(filename::String)
     ESOCini = data["ESOCini"]
     EDL = data["EDL"]
     EDHAvail = data["EDHAvail"]
-    EDRAvail = data["EDRAvail"]
+    # EDRAvail = data["EDRAvail"]
+    EDSAvail = data["EDSAvail"]
+    EDWAvail = data["EDWAvail"]
     params = ModelParams(
         UCL,
         genmap,
@@ -101,8 +109,10 @@ function read_jld2(filename::String)
         GPIni,
         hydromap,
         HAvail,
-        renewablemap,
-        RAvail,
+        # renewablemap,
+        # RAvail,
+        SAvail,
+        WAvail,
         storagemap,
         EPC,
         EPD,
@@ -111,7 +121,9 @@ function read_jld2(filename::String)
         ESOCini,
         EDL,
         EDHAvail,
-        EDRAvail,
+        # EDRAvail,
+        EDSAvail,
+        EDWAvail,
     )
     @info "Done"
     return params

@@ -1,4 +1,4 @@
-using JuMP, DataFrames, CSV, Gurobi
+using JuMP, DataFrames, CSV, Gurobi, Statistics
 
 function getLastOneIndex(
     matrix::Array{Int,2},
@@ -22,6 +22,7 @@ end
 function solving(
     params::STESTS.ModelParams,
     Nday::Int,
+    strategic::Bool,
     DADBids::Matrix{Int64},
     DACBids::Matrix{Int64},
     RTDBids::Matrix{Int64},
@@ -29,7 +30,9 @@ function solving(
     ucmodel::JuMP.Model,
     ucpmodel::JuMP.Model,
     edmodel::JuMP.Model,
+    bidmodels::Vector{Any},
     output_folder::String;
+    ESSeg::Int = 1,
     UCHorizon::Int = 24,
     EDHorizon::Int = 1,
     EDSteps::Int = 12,
@@ -39,14 +42,14 @@ function solving(
     GSMC = repeat(params.GSMC, outer = (1, 1, UCHorizon))
     SU = zeros(Int, size(params.GPIni, 1)) # initial generator must on time
     SD = zeros(Int, size(params.GPIni, 1)) # initial generator down on time
+    storagezone = [findmax(row)[2] for row in eachrow(params.storagemap)]
+    segment_length = 50 ÷ ESSeg
 
     UCcost = Array{Float64}(undef, Nday)
     GMCcost = Array{Float64}(undef, Nday)
     GSMCcost = Array{Float64}(undef, Nday)
     VOLLcost = Array{Float64}(undef, Nday)
     EScost = Array{Float64}(undef, Nday)
-    UCnetgen = Array{Float64}(undef, Nday, UCHorizon)
-    UCgen = Array{Float64}(undef, Nday, UCHorizon)
     EDcost = Array{Float64}(undef, Nday * 24 * EDSteps)
     EDGMCcost = Array{Float64}(undef, Nday * 24 * EDSteps)
     EDGSMCcost = Array{Float64}(undef, Nday * 24 * EDSteps)
@@ -54,6 +57,10 @@ function solving(
     EDEScost = Array{Float64}(undef, Nday * 24 * EDSteps)
     EDGPIni = Array{Float64}(undef, size(params.GPIni, 1))
     GPIniInput = params.GPIni
+    all_UCprices_df = DataFrame()
+    all_EDprices_df = DataFrame()
+    db = Array{Float64}(undef, size(params.storagemap, 1), ESSeg)
+    cb = Array{Float64}(undef, size(params.storagemap, 1), ESSeg)
 
     set_optimizer_attribute(ucmodel, "MIPGap", 0.01)
     for d in 1:Nday
@@ -64,9 +71,17 @@ function solving(
             Matrix{Float64},
             params.HAvail[24*(d-1)+1:24*d+UCHorizon, :]',
         )
-        RAvailInput = convert(
+        # RAvailInput = convert(
+        #     Matrix{Float64},
+        #     params.RAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+        # )
+        SAvailInput = convert(
             Matrix{Float64},
-            params.RAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+            params.SAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+        )
+        WAvailInput = convert(
+            Matrix{Float64},
+            params.WAvail[24*(d-1)+1:24*d+UCHorizon, :]',
         )
         for h in 1:UCHorizon
             # set_normalized_rhs(ucmodel[:Reserve][h], (1 + 0.2) * sum(DInput[:, h])-sum(HAvailInput[:, h])-sum(RAvailInput[:, h]))
@@ -86,9 +101,17 @@ function solving(
                 set_normalized_rhs(ucmodel[:HCap][i, h], HAvailInput[i, h])
                 set_normalized_rhs(ucpmodel[:HCap][i, h], HAvailInput[i, h])
             end
-            for i in axes(RAvailInput, 1)
-                set_normalized_rhs(ucmodel[:ReCap][i, h], RAvailInput[i, h])
-                set_normalized_rhs(ucpmodel[:ReCap][i, h], RAvailInput[i, h])
+            # for i in axes(RAvailInput, 1)
+            #     set_normalized_rhs(ucmodel[:ReCap][i, h], RAvailInput[i, h])
+            #     set_normalized_rhs(ucpmodel[:ReCap][i, h], RAvailInput[i, h])
+            # end
+            for z in axes(SAvailInput, 1)
+                set_normalized_rhs(ucmodel[:SCap][z, h], SAvailInput[z, h])
+                set_normalized_rhs(ucpmodel[:SCap][z, h], SAvailInput[z, h])
+            end
+            for z in axes(WAvailInput, 1)
+                set_normalized_rhs(ucmodel[:WCap][z, h], WAvailInput[z, h])
+                set_normalized_rhs(ucpmodel[:WCap][z, h], WAvailInput[z, h])
             end
             for i in axes(DADBids, 1)
                 set_objective_coefficient(
@@ -138,11 +161,6 @@ function solving(
                     value.(ucmodel[:v])[:, 1:24] .* params.GSUC,
                 )
             # UCcost[d] = objective_value(ucmodel)
-            UCnetgen[d, :] = sum(value.(ucmodel[:guc]), dims = 1)[:]
-            UCgen[d, :] =
-                sum(value.(ucmodel[:guc]), dims = 1)[:] +
-                sum(value.(ucmodel[:gr]), dims = 1)[:] +
-                sum(value.(ucmodel[:gh]), dims = 1)[:]
             U = convert(Matrix{Int64}, round.(value.(ucmodel[:u])))
             V = convert(Matrix{Int64}, round.(value.(ucmodel[:v])))
             W = convert(Matrix{Int64}, round.(value.(ucmodel[:w])))
@@ -173,10 +191,22 @@ function solving(
                 UCGdf,
                 append = true,
             )
-            UCRedf = DataFrame(value.(ucmodel[:gr])', :auto)
+            # UCRedf = DataFrame(value.(ucmodel[:gr])', :auto)
+            # CSV.write(
+            #     joinpath(output_folder, "UCRenewable.csv"),
+            #     UCRedf,
+            #     append = true,
+            # )
+            UCSolardf = DataFrame(value.(ucmodel[:gs])', :auto)
             CSV.write(
-                joinpath(output_folder, "UCRenewable.csv"),
-                UCRedf,
+                joinpath(output_folder, "UCSolar.csv"),
+                UCSolardf,
+                append = true,
+            )
+            UCWinddf = DataFrame(value.(ucmodel[:gw])', :auto)
+            CSV.write(
+                joinpath(output_folder, "UCWind.csv"),
+                UCWinddf,
                 append = true,
             )
             UCHdf = DataFrame(value.(ucmodel[:gh])', :auto)
@@ -198,13 +228,13 @@ function solving(
                 UCHydroZone,
                 append = true,
             )
-            UCRenewableZone =
-                DataFrame(value.(ucmodel[:gr])' * params.renewablemap, :auto)
-            CSV.write(
-                joinpath(output_folder, "UCRenewableZone.csv"),
-                UCRenewableZone,
-                append = true,
-            )
+            # UCRenewableZone =
+            #     DataFrame(value.(ucmodel[:gr])' * params.renewablemap, :auto)
+            # CSV.write(
+            #     joinpath(output_folder, "UCRenewableZone.csv"),
+            #     UCRenewableZone,
+            #     append = true,
+            # )
             UCSoCZone =
                 DataFrame(value.(ucmodel[:e])' * params.storagemap, :auto)
             CSV.write(
@@ -297,6 +327,7 @@ function solving(
                 UCpricedf,
                 append = true,
             )
+            all_UCprices_df = vcat(all_UCprices_df, UCpricedf)
 
             # Solving economic dispatch model
             EDU = repeat(U, inner = (1, EDSteps))
@@ -319,10 +350,23 @@ function solving(
                         Matrix{Float64},
                         params.EDHAvail[ts:ts+EDHorizon-1, :]',
                     )
-                    EDRAvailInput = convert(
+                    # EDRAvailInput = convert(
+                    #     Matrix{Float64},
+                    #     params.EDRAvail[ts:ts+EDHorizon-1, :]',
+                    # )
+                    EDSAvailInput = convert(
                         Matrix{Float64},
-                        params.EDRAvail[ts:ts+EDHorizon-1, :]',
+                        params.EDSAvail[ts:ts+EDHorizon-1, :]',
                     )
+                    EDWAvailInput = convert(
+                        Matrix{Float64},
+                        params.EDWAvail[ts:ts+EDHorizon-1, :]',
+                    )
+                    if d > 1
+                        last_24_UC = all_UCprices_df[(end-47+h):(end-24+h), :]
+                        last_36_ED = all_EDprices_df[(end-35):end, :]
+                        predictors = vcat(last_24_UC, last_36_ED)
+                    end
                     for tp in 1:EDHorizon
                         # Ad hoc method to solve initial generation output for ED model
                         if ts == 1 && tp == 1
@@ -363,38 +407,72 @@ function solving(
                                 # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
                             end
                             # TODO
-                            for i in axes(params.ESOCini, 1)
-                                set_normalized_rhs(
-                                    edmodel[:StorageSOCIni][i],
-                                    params.ESOCini[i],
-                                )
-                            end
-                        end
-                        for i in axes(RTDBids, 1)
-                            # if d == 1
-                            set_objective_coefficient(
-                                edmodel,
-                                edmodel[:d][i, tp],
-                                RTDBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
-                            )
-                            set_objective_coefficient(
-                                edmodel,
-                                edmodel[:c][i, tp],
-                                -RTCBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
-                            )
-                            # else
-                            #     # TODO bid base on models
-                            #     set_objective_coefficient(
-                            #         edmodel,
-                            #         edmodel[:d][i, tp],
-                            #         RTDBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
-                            #     )
-                            #     set_objective_coefficient(
-                            #         edmodel,
-                            #         edmodel[:c][i, tp],
-                            #         -RTCBids[i, (h-1)*EDSteps+t+tp-1] / EDSteps,
+                            # for i in axes(params.ESOCini, 1)
+                            #     set_normalized_rhs(
+                            #         edmodel[:StorageSOCIni][i],
+                            #         params.ESOCini[i],
                             #     )
                             # end
+                        end
+
+                        # update energy storage bids
+                        if strategic == true
+                            for (i, model) in bidmodels
+                                if d == 1
+                                    db[i, :] .=
+                                        RTDBids[i, (h-1)*EDSteps+t] / EDSteps
+                                    cb[i, :] .=
+                                        -RTCBids[i, (h-1)*EDSteps+t] / EDSteps
+                                else
+                                    v = model(
+                                        predictors[
+                                            :,
+                                            findfirst(
+                                                isequal(1),
+                                                params.storagemap[i, :],
+                                            ),
+                                        ],
+                                    )
+                                    vavg = [
+                                        mean(
+                                            v[(i-1)*segment_length+1:i*segment_length],
+                                        ) for i in 1:ESSeg
+                                    ]
+                                    cb[i, :] .= vavg .* 0.9 ./ EDSteps
+                                    db[i, :] .= (vavg ./ 0.9 .+ 10) ./ EDSteps
+                                end
+                                for s in 1:ESSeg
+                                    set_objective_coefficient(
+                                        edmodel,
+                                        edmodel[:d][i, s, tp],
+                                        db[i, s],
+                                    )
+                                    set_objective_coefficient(
+                                        edmodel,
+                                        edmodel[:c][i, s, tp],
+                                        cb[i, s],
+                                    )
+                                end
+                            end
+                        else
+                            for i in axes(RTDBids, 1)
+                                db[i, :] .=
+                                    RTDBids[i, (h-1)*EDSteps+t] / EDSteps
+                                cb[i, :] .=
+                                    -RTCBids[i, (h-1)*EDSteps+t] / EDSteps
+                                for s in 1:ESSeg
+                                    set_objective_coefficient(
+                                        edmodel,
+                                        edmodel[:d][i, s, tp],
+                                        db[i, s],
+                                    )
+                                    set_objective_coefficient(
+                                        edmodel,
+                                        edmodel[:c][i, s, tp],
+                                        cb[i, s],
+                                    )
+                                end
+                            end
                         end
                         for z in axes(EDLInput, 1)
                             set_normalized_rhs(
@@ -422,10 +500,22 @@ function solving(
                                 EDHAvailInput[i, tp],
                             )
                         end
-                        for i in axes(EDRAvailInput, 1)
+                        # for i in axes(EDRAvailInput, 1)
+                        #     set_normalized_rhs(
+                        #         edmodel[:ReCap][i, tp],
+                        #         EDRAvailInput[i, tp],
+                        #     )
+                        # end
+                        for z in axes(EDSAvailInput, 1)
                             set_normalized_rhs(
-                                edmodel[:ReCap][i, tp],
-                                EDRAvailInput[i, tp],
+                                edmodel[:SCap][z, tp],
+                                EDSAvailInput[z, tp],
+                            )
+                        end
+                        for z in axes(EDWAvailInput, 1)
+                            set_normalized_rhs(
+                                edmodel[:WCap][z, tp],
+                                EDWAvailInput[z, tp],
                             )
                         end
                         if EDHorizon > 1 && tp > 1
@@ -461,14 +551,18 @@ function solving(
                             ) / EDSteps
                         EDVOLL[ts] =
                             sum(value.(edmodel[:s])[:, 1] .* VOLL) / EDSteps
-                        # todo!!! update bids
-                        EDEScost[ts] =
-                            sum(
-                                value.(edmodel[:d])[:, 1] .*
-                                RTDBids[:, (h-1)*EDSteps+t] -
-                                value.(edmodel[:c])[:, 1] .*
-                                RTCBids[:, (h-1)*EDSteps+t],
-                            ) / EDSteps
+                        # todo!!! update bidmodel
+                        # EDEScost[ts] =
+                        #     sum(
+                        #         value.(edmodel[:d])[:, :, 1] .*
+                        #         RTDBids[:, (h-1)*EDSteps+t] -
+                        #         value.(edmodel[:c])[:, :, 1] .*
+                        #         RTCBids[:, (h-1)*EDSteps+t],
+                        #     ) / EDSteps
+                        EDEScost[ts] = sum(
+                            value.(edmodel[:d])[:, :, 1] .* db +
+                            value.(edmodel[:c])[:, :, 1] .* cb,
+                        )
                         EDcost[ts] =
                             EDGMCcost[ts] +
                             EDGSMCcost[ts] +
@@ -486,13 +580,13 @@ function solving(
                             EDGdf,
                             append = true,
                         )
-                        EDReGen = value.(edmodel[:gr])[:, 1]
-                        EDReGendf = DataFrame(EDReGen', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDRenewable.csv"),
-                            EDReGendf,
-                            append = true,
-                        )
+                        # EDReGen = value.(edmodel[:gr])[:, 1]
+                        # EDReGendf = DataFrame(EDReGen', :auto)
+                        # CSV.write(
+                        #     joinpath(output_folder, "EDRenewable.csv"),
+                        #     EDReGendf,
+                        #     append = true,
+                        # )
                         EDHydroGen = value.(edmodel[:gh])[:, 1]
                         EDHydroGendf = DataFrame(EDHydroGen', :auto)
                         CSV.write(
@@ -500,7 +594,17 @@ function solving(
                             EDHydroGendf,
                             append = true,
                         )
-                        EDSOCini = value.(edmodel[:e])[:, 1]
+                        CSV.write(
+                            joinpath(output_folder, "EDDbid.csv"),
+                            DataFrame(db', :auto),
+                            append = true,
+                        )
+                        CSV.write(
+                            joinpath(output_folder, "EDCbid.csv"),
+                            DataFrame(cb', :auto),
+                            append = true,
+                        )
+                        EDSOCini = value.(edmodel[:totale])[:, 1]
                         EDSOCinidf = DataFrame(EDSOCini', :auto)
                         CSV.write(
                             joinpath(output_folder, "EDSOCini.csv"),
@@ -528,6 +632,17 @@ function solving(
                             EDpricedf,
                             append = true,
                         )
+                        all_EDprices_df = vcat(all_EDprices_df, EDpricedf)
+                        EDESRev =
+                            EDprice[storagezone] .* (
+                                value.(edmodel[:d])[:, 1] -
+                                value.(edmodel[:c])[:, 1]
+                            )
+                        CSV.write(
+                            joinpath(output_folder, "EDESRev.csv"),
+                            DataFrame(EDESRev', :auto),
+                            append = true,
+                        )
                         EDGZone = DataFrame(
                             value.(edmodel[:guc])[:, 1]' * params.genmap,
                             :auto,
@@ -546,17 +661,31 @@ function solving(
                             EDHydroZone,
                             append = true,
                         )
-                        EDRenewableZone = DataFrame(
-                            value.(edmodel[:gr])[:, 1]' * params.renewablemap,
-                            :auto,
-                        )
+                        # EDRenewableZone = DataFrame(
+                        #     value.(edmodel[:gr])[:, 1]' * params.renewablemap,
+                        #     :auto,
+                        # )
+                        # CSV.write(
+                        #     joinpath(output_folder, "EDRenewableZone.csv"),
+                        #     EDRenewableZone,
+                        #     append = true,
+                        # )
+                        EDSolarZone =
+                            DataFrame(value.(edmodel[:gs])[:, 1]', :auto)
                         CSV.write(
-                            joinpath(output_folder, "EDRenewableZone.csv"),
-                            EDRenewableZone,
+                            joinpath(output_folder, "EDSolarZone.csv"),
+                            EDSolarZone,
+                            append = true,
+                        )
+                        EDWindZone =
+                            DataFrame(value.(edmodel[:gw])[:, 1]', :auto)
+                        CSV.write(
+                            joinpath(output_folder, "EDWindZone.csv"),
+                            EDWindZone,
                             append = true,
                         )
                         EDSOCZone = DataFrame(
-                            value.(edmodel[:e])[:, 1]' * params.storagemap,
+                            value.(edmodel[:totale])[:, 1]' * params.storagemap,
                             :auto,
                         )
                         CSV.write(
@@ -622,16 +751,16 @@ function solving(
                         end
 
                         # TODO: update initial storage SOC
-                        # for i in axes(EDSOCini, 1)
-                        #     set_normalized_rhs(
-                        #         ucmodel[:StorageSOCIni][i],
-                        #         EDSOCini[i],
-                        #     )
-                        #     set_normalized_rhs(
-                        #         ucpmodel[:StorageSOCIni][i],
-                        #         EDSOCini[i],
-                        #     )
-                        # end
+                        for i in axes(EDSOCini, 1)
+                            set_normalized_rhs(
+                                ucmodel[:StorageSOCIni][i],
+                                EDSOCini[i],
+                            )
+                            set_normalized_rhs(
+                                ucpmodel[:StorageSOCIni][i],
+                                EDSOCini[i],
+                            )
+                        end
                     end
                 end
             end
@@ -652,5 +781,5 @@ function solving(
             append = true,
         )
     end
-    return UCcost, UCnetgen, UCgen, EDcost
+    return UCcost, EDcost
 end

@@ -19,7 +19,9 @@ function unitcommitmentprice(
     GSMC = repeat(params.GSMC, outer = (1, 1, Horizon))
     UCL = convert(Matrix{Float64}, params.UCL[1:Horizon, :]')
     HAvail = convert(Matrix{Float64}, params.HAvail[1:Horizon, :]')
-    RAvail = convert(Matrix{Float64}, params.RAvail[1:Horizon, :]')
+    # RAvail = convert(Matrix{Float64}, params.RAvail[1:Horizon, :]')
+    SAvail = convert(Matrix{Float64}, params.SAvail[1:Horizon, :]')
+    WAvail = convert(Matrix{Float64}, params.WAvail[1:Horizon, :]')
 
     ntimepoints = Horizon # number of time points
     nbus = size(UCL, 1) # number of buses
@@ -27,7 +29,7 @@ function unitcommitmentprice(
     nucgen = size(params.genmap, 1) # number of conventional generators
     ngucs = size(GSMC, 2) # number of generator segments
     nhydro = size(params.hydromap, 1) # number of hydro generators
-    nrenewable = size(params.renewablemap, 1) # number of renewable generators
+    # nrenewable = size(params.renewablemap, 1) # number of renewable generators
     nstorage = size(params.storagemap, 1) # number of storage units
     U = zeros(Int, size(params.GPIni, 1), Horizon)
     V = zeros(Int, size(params.GPIni, 1), Horizon)
@@ -41,7 +43,9 @@ function unitcommitmentprice(
     @variable(ucpmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
     @variable(ucpmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
     @variable(ucpmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
-    @variable(ucpmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
+    # @variable(ucpmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
+    @variable(ucpmodel, gs[1:nbus, 1:ntimepoints] >= 0) # Solar output
+    @variable(ucpmodel, gw[1:nbus, 1:ntimepoints] >= 0) # Wind output
     @variable(ucpmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
     @variable(ucpmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
     @variable(ucpmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
@@ -60,12 +64,24 @@ function unitcommitmentprice(
     )
 
     # Bus wise load balance constraints with transmission
+    # @constraint(
+    #     ucpmodel,
+    #     LoadBalance[z = 1:nbus, h = 1:ntimepoints],
+    #     sum(params.genmap[:, z] .* guc[:, h]) +
+    #     sum(params.hydromap[:, z] .* gh[:, h]) +
+    #     sum(params.renewablemap[:, z] .* gr[:, h]) +
+    #     sum(params.storagemap[:, z] .* d[:, h]) -
+    #     sum(params.storagemap[:, z] .* c[:, h]) +
+    #     sum(params.transmap[:, z] .* f[:, h]) +
+    #     s[z, h] == UCL[z, h]
+    # )
     @constraint(
         ucpmodel,
         LoadBalance[z = 1:nbus, h = 1:ntimepoints],
         sum(params.genmap[:, z] .* guc[:, h]) +
         sum(params.hydromap[:, z] .* gh[:, h]) +
-        sum(params.renewablemap[:, z] .* gr[:, h]) +
+        gs[z, h] +
+        gw[z, h] +
         sum(params.storagemap[:, z] .* d[:, h]) -
         sum(params.storagemap[:, z] .* c[:, h]) +
         sum(params.transmap[:, z] .* f[:, h]) +
@@ -202,10 +218,20 @@ function unitcommitmentprice(
         HCap[i = 1:nhydro, h = 1:Horizon],
         gh[i, h] <= HAvail[i, h]
     )
+    # @constraint(
+    #     ucpmodel,
+    #     ReCap[i = 1:nrenewable, h = 1:Horizon],
+    #     gr[i, h] <= RAvail[i, h]
+    # )
     @constraint(
         ucpmodel,
-        ReCap[i = 1:nrenewable, h = 1:Horizon],
-        gr[i, h] <= RAvail[i, h]
+        SCap[z = 1:nbus, h = 1:Horizon],
+        gs[z, h] <= SAvail[z, h]
+    )
+    @constraint(
+        ucpmodel,
+        WCap[z = 1:nbus, h = 1:Horizon],
+        gw[z, h] <= WAvail[z, h]
     )
     # Ramping limits
     # @constraint(ucmodel, RUIni[i = 1:nucgen], guc[i, 1] - GPini[i] <= GRU[i])
