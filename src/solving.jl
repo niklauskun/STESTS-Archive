@@ -31,15 +31,19 @@ function solving(
     ucpmodel::JuMP.Model,
     edmodel::JuMP.Model,
     bidmodels::Vector{Any},
-    output_folder::String;
+    output_folder::String,
+    PriceCap::Array{Float64};
     ESSeg::Int = 1,
     UCHorizon::Int = 24,
     EDHorizon::Int = 1,
     EDSteps::Int = 12,
-    VOLL::Float64 = 1000.0,
+    VOLL::Float64 = 9000.0,
     RM::Float64 = 0.03,
+    ErrorAdjustment::Float64 = 1.0,
+    LoadAdjustment::Float64 = 1.0,
 )
     GSMC = repeat(params.GSMC, outer = (1, 1, UCHorizon))
+    EDGSMC = repeat(params.GSMC, outer = (1, 1, EDHorizon))
     SU = zeros(Int, size(params.GPIni, 1)) # initial generator must on time
     SD = zeros(Int, size(params.GPIni, 1)) # initial generator down on time
     storagezone = [findmax(row)[2] for row in eachrow(params.storagemap)]
@@ -61,12 +65,22 @@ function solving(
     all_EDprices_df = DataFrame()
     db = Array{Float64}(undef, size(params.storagemap, 1), ESSeg)
     cb = Array{Float64}(undef, size(params.storagemap, 1), ESSeg)
+    AdjustedUCL = params.UCL * LoadAdjustment
+    UCL_repeated = repeat(params.UCL, inner = (12, 1))
+    LoadError = UCL_repeated - params.EDL
+    AdjustedEDL = (UCL_repeated - LoadError * ErrorAdjustment) * LoadAdjustment
+    Solar_repeated = repeat(params.SAvail, inner = (12, 1))
+    SolarError = Solar_repeated - params.EDSAvail
+    AdjustedEDSolar = Solar_repeated - SolarError * ErrorAdjustment
+    Wind_repeated = repeat(params.WAvail, inner = (12, 1))
+    WindError = Wind_repeated - params.EDWAvail
+    AdjustedEDWind = Wind_repeated - WindError * ErrorAdjustment
 
     set_optimizer_attribute(ucmodel, "MIPGap", 0.01)
     for d in 1:Nday
         # Update load and renewable generation
         LInput =
-            convert(Matrix{Float64}, params.UCL[24*(d-1)+1:24*d+UCHorizon, :]')
+            convert(Matrix{Float64}, AdjustedUCL[24*(d-1)+1:24*d+UCHorizon, :]')
         HAvailInput = convert(
             Matrix{Float64},
             params.HAvail[24*(d-1)+1:24*d+UCHorizon, :]',
@@ -138,6 +152,7 @@ function solving(
         end
 
         # Solve unit commitment model
+        @info "Solving day $d UC."
         optimize!(ucmodel)
 
         # Extract solution and solve economic dispatch model
@@ -344,7 +359,7 @@ function solving(
                     ts = ((d - 1) * 24 + h - 1) * EDSteps + t # time step
                     EDLInput = convert(
                         Matrix{Float64},
-                        params.EDL[ts:ts+EDHorizon-1, :]',
+                        AdjustedEDL[ts:ts+EDHorizon-1, :]',
                     )
                     EDHAvailInput = convert(
                         Matrix{Float64},
@@ -356,11 +371,11 @@ function solving(
                     # )
                     EDSAvailInput = convert(
                         Matrix{Float64},
-                        params.EDSAvail[ts:ts+EDHorizon-1, :]',
+                        AdjustedEDSolar[ts:ts+EDHorizon-1, :]',
                     )
                     EDWAvailInput = convert(
                         Matrix{Float64},
-                        params.EDWAvail[ts:ts+EDHorizon-1, :]',
+                        AdjustedEDWind[ts:ts+EDHorizon-1, :]',
                     )
                     if d > 1
                         last_24_UC = all_UCprices_df[(end-47+h):(end-24+h), :]
@@ -538,6 +553,7 @@ function solving(
                         end
                     end
                     # Solve economic dispatch model
+                    @info "Solving day $d hour $h step $t ED."
                     optimize!(edmodel)
                     # # Extract solution
                     if termination_status(edmodel) == MOI.OPTIMAL
@@ -547,10 +563,13 @@ function solving(
                         EDGSMCcost[ts] =
                             sum(
                                 value.(edmodel[:gucs])[:, :, 1] .*
-                                GSMC[:, :, 1],
+                                EDGSMC[:, :, 1],
                             ) / EDSteps
                         EDVOLL[ts] =
-                            sum(value.(edmodel[:s])[:, 1] .* VOLL) / EDSteps
+                            sum(
+                                value.(edmodel[:s])[:, :, 1] .*
+                                PriceCap[:, :, 1],
+                            ) / EDSteps
                         # todo!!! update bidmodel
                         # EDEScost[ts] =
                         #     sum(
@@ -618,7 +637,7 @@ function solving(
                             EDTransdf,
                             append = true,
                         )
-                        EDS = value.(edmodel[:s])[:, 1]
+                        EDS = value.(edmodel[:totals])[:, 1]
                         EDSdf = DataFrame(EDS', :auto)
                         CSV.write(
                             joinpath(output_folder, "EDSlack.csv"),
@@ -635,8 +654,8 @@ function solving(
                         all_EDprices_df = vcat(all_EDprices_df, EDpricedf)
                         EDESRev =
                             EDprice[storagezone] .* (
-                                value.(edmodel[:d])[:, 1] -
-                                value.(edmodel[:c])[:, 1]
+                                value.(edmodel[:totald])[:, 1] -
+                                value.(edmodel[:totalc])[:, 1]
                             )
                         CSV.write(
                             joinpath(output_folder, "EDESRev.csv"),
@@ -684,6 +703,24 @@ function solving(
                             EDWindZone,
                             append = true,
                         )
+                        EDESDisZone = DataFrame(
+                            value.(edmodel[:totald])[:, 1]' * params.storagemap,
+                            :auto,
+                        )
+                        CSV.write(
+                            joinpath(output_folder, "EDESDisZone.csv"),
+                            EDESDisZone,
+                            append = true,
+                        )
+                        EDESChaZone = DataFrame(
+                            value.(edmodel[:totalc])[:, 1]' * params.storagemap,
+                            :auto,
+                        )
+                        CSV.write(
+                            joinpath(output_folder, "EDESChaZone.csv"),
+                            EDESChaZone,
+                            append = true,
+                        )
                         EDSOCZone = DataFrame(
                             value.(edmodel[:totale])[:, 1]' * params.storagemap,
                             :auto,
@@ -722,6 +759,9 @@ function solving(
                         println("Model is infeasible. Starting IIS analysis...")
                         compute_conflict!(edmodel)
                         iis_model, _ = copy_conflict(edmodel)
+                        open("diagnose_output_ed.txt", "w") do f
+                            return write(f, string(iis_model))
+                        end
                         print(iis_model)
 
                         error(

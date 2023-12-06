@@ -15,6 +15,7 @@ function unitcommitmentprice(
     Horizon::Int = 24, # planning horizon
     VOLL::Float64 = 1000.0, # value of lost load
     RM::Float64 = 0.03, # reserve margin
+    FuelAdjustment::Float64 = 1.0, # fuel adjustment
 )::JuMP.Model
     GSMC = repeat(params.GSMC, outer = (1, 1, Horizon))
     UCL = convert(Matrix{Float64}, params.UCL[1:Horizon, :]')
@@ -57,8 +58,8 @@ function unitcommitmentprice(
     @objective(
         ucpmodel,
         Min,
-        sum(params.GMC .* guc) +
-        sum(GSMC .* gucs) +
+        sum(FuelAdjustment * params.GMC .* guc) +
+        sum(FuelAdjustment * GSMC .* gucs) +
         sum(300.0 .* d - 0.0 .* c) +
         sum(VOLL .* s)
     )

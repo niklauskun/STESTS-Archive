@@ -5,9 +5,9 @@ using Interpolations
 # read CSV files
 
 RealTimeNoise = true
-CurrentMix = true
+# CurrentMix = true
 TransmissionCap = true
-DataName = "./data/ADS2032_7RegionNoise.jld2"
+DataName = "./data/ADS2032_7RegionNoise_4hrBES_5GWBES.jld2"
 folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
 
 @info "Reading data from $folder..."
@@ -142,12 +142,13 @@ timereaddata = @elapsed begin
     storagemap = Matrix(
         CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
     )
-    storagedata = CSV.read(joinpath(folder, "Storage_C.csv"), DataFrame)
+    storagedata =
+        CSV.read(joinpath(folder, "Storage_C_4hr_5GW.csv"), DataFrame)
 
-    EPC = -storagedata[!, :"MinCap(MW)"] * 2.5 # read storage charge capacity, in MW
-    EPD = storagedata[!, :"MaxCap(MW)"] * 2.5 # read storage discharge capacity, in MW
+    EPC = -storagedata[!, :"MinCap(MW)"] # read storage charge capacity, in MW
+    EPD = storagedata[!, :"MaxCap(MW)"] # read storage discharge capacity, in MW
     Eeta = storagedata[!, :"Efficiency"] # read storage efficiency
-    ESOC = storagedata[!, :"MaxCap(MWh)"] * 2.5 # read storage state of charge capacity, in MWh
+    ESOC = storagedata[!, :"MaxCap(MWh)"] # read storage state of charge capacity, in MWh
     ESOCini = 0.5 * ESOC # initial state of charge, in MWh
     @assert length(EPC) == size(storagemap, 1) "storage data length mismatch."
 
@@ -207,16 +208,34 @@ timereaddata = @elapsed begin
 
     if RealTimeNoise == true
         EDL = Matrix(
-            CSV.read(joinpath(folder, "realtimeload_all.csv"), DataFrame)[:, :],
+            CSV.read(
+                joinpath(folder, "realtimeload_all.csv"),
+                DataFrame,
+                header = false,
+            )[
+                :,
+                :,
+            ],
         ) # read demand, in MW
         EDSAvail = Matrix(
-            CSV.read(joinpath(folder, "realtimesolar_all.csv"), DataFrame)[
+            CSV.read(
+                joinpath(folder, "realtimesolar_all.csv"),
+                DataFrame,
+                header = false,
+            )[
                 :,
                 :,
             ],
         )
         EDWAvail = Matrix(
-            CSV.read(joinpath(folder, "realtimewind_all.csv"), DataFrame)[:, :],
+            CSV.read(
+                joinpath(folder, "realtimewind_all.csv"),
+                DataFrame,
+                header = false,
+            )[
+                :,
+                :,
+            ],
         )
     else
         EDL = zeros(105408, size(UCL, 2))

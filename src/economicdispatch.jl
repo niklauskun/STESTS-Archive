@@ -1,11 +1,12 @@
 using JuMP, Gurobi
 
 function economicdispatch(
-    params::STESTS.ModelParams;
+    params::STESTS.ModelParams,
+    PriceCap::Array{Float64}; # value of lost load;
     ESSeg::Int = 1,
     Horizon::Int = 1, # planning horizon
     Steps::Int = 12, # planning steps
-    VOLL::Float64 = 1000.0, # value of lost load
+    FuelAdjustment::Float64 = 1.0, # fuel adjustment
 )::JuMP.Model
     GSMC = repeat(params.GSMC, outer = (1, 1, Horizon)) # segment marginal cost of generators, repeat by EDHorizon
     EDL = convert(Matrix{Float64}, params.EDL[1:Horizon, :]')
@@ -35,7 +36,7 @@ function economicdispatch(
     # @variable(edmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(edmodel, gs[1:nbus, 1:ntimepoints] >= 0) # Solar output
     @variable(edmodel, gw[1:nbus, 1:ntimepoints] >= 0) # Wind output
-    @variable(edmodel, s[1:nbus, 1:ntimepoints] >= 0) # Slack variable
+    @variable(edmodel, 0 <= s[1:nbus, 1:40, 1:ntimepoints] <= 100) # Slack variable
     # @variable(edmodel, c[1:nstorage, 1:ntimepoints] >= 0) # Storage charging
     # @variable(edmodel, d[1:nstorage, 1:ntimepoints] >= 0) # Storage discharging
     # @variable(edmodel, e[1:nstorage, 1:ntimepoints] >= 0) # Storage energy level
@@ -57,16 +58,17 @@ function economicdispatch(
         totale[i = 1:nstorage, t = 1:ntimepoints],
         sum(e[i, :, t])
     )
+    @expression(edmodel, totals[z = 1:nbus, t = 1:ntimepoints], sum(s[z, :, t]))
     @variable(edmodel, gucs[1:nucgen, 1:ngucs, 1:ntimepoints] >= 0) # Conventional generator segment output
 
     # Define objective function and constraints， no-load and start-up cost will be added later
     @objective(
         edmodel,
         Min,
-        sum(params.GMC .* guc) / Steps +
-        sum(GSMC .* gucs) / Steps +
+        sum(FuelAdjustment * params.GMC .* guc) / Steps +
+        sum(FuelAdjustment * GSMC .* gucs) / Steps +
         sum(200 .* d - 0 .* c) / Steps +
-        sum(VOLL .* s) / Steps
+        sum(PriceCap .* s) / Steps
     )
 
     # Bus wise load balance constraints with transmission
@@ -91,7 +93,7 @@ function economicdispatch(
         sum(params.storagemap[:, z] .* totald[:, t]) -
         sum(params.storagemap[:, z] .* totalc[:, t]) +
         sum(params.transmap[:, z] .* f[:, t]) +
-        s[z, t] == EDL[z, t]
+        sum(s[z, :, t]) == EDL[z, t]
     )
 
     # Load balance constraints without transmission
