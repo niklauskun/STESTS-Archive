@@ -1,5 +1,22 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics
 
+DABidsSingle = Matrix(
+    CSV.read(
+        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageDABids.csv",
+        DataFrame,
+    ),
+)
+RTBidsSingle = Matrix(
+    CSV.read(
+        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageRTBids.csv",
+        DataFrame,
+    ),
+)
+DADBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
+DACBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
+RTDBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
+RTCBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
+
 # Read data from .jld2 file 
 params = STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES.jld2")
 model_filenames =
@@ -8,17 +25,17 @@ model_filenames =
 strategic = false
 RM = 0.03
 VOLL = 9000.0
-# PriceCap = 1000.0
-UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
+UCHorizon = Int(72) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(13) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
-NDay = 364
+NDay = 362
+
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
     outer = (1, 1, EDHorizon),
 )
-FuelAdjustment = 1.5
+FuelAdjustment = 1.2
 ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
 
@@ -40,158 +57,22 @@ output_folder =
     "_5GWBES_1yr_emergency"
 mkpath(output_folder)
 
-DADBidsSingle = [
-    150,
-    150,
-    145,
-    140,
-    135,
-    130,
-    125,
-    140,
-    150,
-    150,
-    150,
-    150,
-    150,
-    145,
-    140,
-    120,
-    100,
-    80,
-    60,
-    50,
-    80,
-    110,
-    140,
-    150,
-    150,
-    150,
-    145,
-    140,
-    135,
-    130,
-    125,
-    140,
-    150,
-    150,
-    150,
-    150,
-    150,
-    145,
-    140,
-    120,
-    100,
-    80,
-    60,
-    50,
-    80,
-    110,
-    140,
-    150,
-    150,
-    150,
-    145,
-    140,
-    135,
-    130,
-    125,
-    140,
-    150,
-    150,
-    150,
-    150,
-    150,
-    145,
-    140,
-    120,
-    100,
-    80,
-    60,
-    50,
-    80,
-    110,
-    140,
-    150,
-]
-DACBidsSingle = [
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -35,
-    -20,
-    -5,
-    10,
-    25,
-    10,
-    -5,
-    -20,
-    -35,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -35,
-    -20,
-    -5,
-    10,
-    25,
-    10,
-    -5,
-    -20,
-    -35,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -35,
-    -20,
-    -5,
-    10,
-    25,
-    10,
-    -5,
-    -20,
-    -35,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-    -50,
-]
+DABidsSingle = Matrix(
+    CSV.read(
+        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageDABids.csv",
+        DataFrame,
+    ),
+)
+RTBidsSingle = Matrix(
+    CSV.read(
+        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageRTBids.csv",
+        DataFrame,
+    ),
+)
 DADBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
 DACBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
-RTDBids = repeat(DADBids, inner = (1, EDSteps))
-RTCBids = repeat(DACBids, inner = (1, EDSteps))
+RTDBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
+RTCBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
 
 bidmodels = STESTS.loadbidmodels(model_filenames)
 storagebidmodels =

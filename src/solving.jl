@@ -79,11 +79,13 @@ function solving(
     set_optimizer_attribute(ucmodel, "MIPGap", 0.01)
     for d in 1:Nday
         # Update load and renewable generation
-        LInput =
-            convert(Matrix{Float64}, AdjustedUCL[24*(d-1)+1:24*d+UCHorizon, :]')
+        LInput = convert(
+            Matrix{Float64},
+            AdjustedUCL[24*(d-1)+1:24*d+UCHorizon-24, :]',
+        )
         HAvailInput = convert(
             Matrix{Float64},
-            params.HAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+            params.HAvail[24*(d-1)+1:24*d+UCHorizon-24, :]',
         )
         # RAvailInput = convert(
         #     Matrix{Float64},
@@ -91,12 +93,16 @@ function solving(
         # )
         SAvailInput = convert(
             Matrix{Float64},
-            params.SAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+            params.SAvail[24*(d-1)+1:24*d+UCHorizon-24, :]',
         )
         WAvailInput = convert(
             Matrix{Float64},
-            params.WAvail[24*(d-1)+1:24*d+UCHorizon, :]',
+            params.WAvail[24*(d-1)+1:24*d+UCHorizon-24, :]',
         )
+        DADBidsInput =
+            convert(Matrix{Float64}, DADBids[:, 24*(d-1)+1:24*d+UCHorizon-24])
+        DACBidsInput =
+            convert(Matrix{Float64}, DACBids[:, 24*(d-1)+1:24*d+UCHorizon-24])
         for h in 1:UCHorizon
             # set_normalized_rhs(ucmodel[:Reserve][h], (1 + 0.2) * sum(DInput[:, h])-sum(HAvailInput[:, h])-sum(RAvailInput[:, h]))
             for z in axes(LInput, 1)
@@ -131,22 +137,22 @@ function solving(
                 set_objective_coefficient(
                     ucmodel,
                     ucmodel[:d][i, h],
-                    DADBids[i, h],
+                    DADBidsInput[i, h],
                 )
                 set_objective_coefficient(
                     ucmodel,
                     ucmodel[:c][i, h],
-                    -DACBids[i, h],
+                    -DACBidsInput[i, h],
                 )
                 set_objective_coefficient(
                     ucpmodel,
                     ucpmodel[:d][i, h],
-                    DADBids[i, h],
+                    DADBidsInput[i, h],
                 )
                 set_objective_coefficient(
                     ucpmodel,
                     ucpmodel[:c][i, h],
-                    -DACBids[i, h],
+                    -DACBidsInput[i, h],
                 )
             end
         end
@@ -377,6 +383,10 @@ function solving(
                         Matrix{Float64},
                         AdjustedEDWind[ts:ts+EDHorizon-1, :]',
                     )
+                    EDDBidInput =
+                        convert(Matrix{Float64}, RTDBids[:, ts:ts+EDHorizon-1])
+                    EDCBidInput =
+                        convert(Matrix{Float64}, RTCBids[:, ts:ts+EDHorizon-1])
                     if d > 1
                         last_24_UC = all_UCprices_df[(end-47+h):(end-24+h), :]
                         last_36_ED = all_EDprices_df[(end-35):end, :]
@@ -434,10 +444,8 @@ function solving(
                         if strategic == true
                             for (i, model) in bidmodels
                                 if d == 1
-                                    db[i, :] .=
-                                        RTDBids[i, (h-1)*EDSteps+t] / EDSteps
-                                    cb[i, :] .=
-                                        -RTCBids[i, (h-1)*EDSteps+t] / EDSteps
+                                    db[i, :] .= EDDBidInput[i, tp] / EDSteps
+                                    cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
                                 else
                                     v = model(
                                         predictors[
@@ -471,10 +479,8 @@ function solving(
                             end
                         else
                             for i in axes(RTDBids, 1)
-                                db[i, :] .=
-                                    RTDBids[i, (h-1)*EDSteps+t] / EDSteps
-                                cb[i, :] .=
-                                    -RTCBids[i, (h-1)*EDSteps+t] / EDSteps
+                                db[i, :] .= EDDBidInput[i, tp] / EDSteps
+                                cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
                                 for s in 1:ESSeg
                                     set_objective_coefficient(
                                         edmodel,
@@ -579,8 +585,10 @@ function solving(
                         #         RTCBids[:, (h-1)*EDSteps+t],
                         #     ) / EDSteps
                         EDEScost[ts] = sum(
-                            value.(edmodel[:d])[:, :, 1] .* db +
-                            value.(edmodel[:c])[:, :, 1] .* cb,
+                            value.(edmodel[:d])[:, :, 1] .*
+                            (EDDBidInput[:, 1] / EDSteps) -
+                            value.(edmodel[:c])[:, :, 1] .*
+                            (EDCBidInput[:, 1] / EDSteps),
                         )
                         EDcost[ts] =
                             EDGMCcost[ts] +
@@ -615,12 +623,12 @@ function solving(
                         )
                         CSV.write(
                             joinpath(output_folder, "EDDbid.csv"),
-                            DataFrame(db', :auto),
+                            DataFrame(EDDBidInput[:, 1]', :auto),
                             append = true,
                         )
                         CSV.write(
                             joinpath(output_folder, "EDCbid.csv"),
-                            DataFrame(cb', :auto),
+                            DataFrame(EDCBidInput[:, 1]', :auto),
                             append = true,
                         )
                         EDSOCini = value.(edmodel[:totale])[:, 1]
