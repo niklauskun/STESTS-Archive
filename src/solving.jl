@@ -822,12 +822,8 @@ function solving(
             end
             error("No optimal solution found for UC on day $d.")
         end
-        EDcostdf = DataFrame(cost = EDcost)
-        CSV.write(
-            joinpath(output_folder, "EDcost.csv"),
-            EDcostdf,
-            append = true,
-        )
     end
+    EDcostdf = DataFrame(cost = EDcost)
+    CSV.write(joinpath(output_folder, "EDcost.csv"), EDcostdf, append = true)
     return UCcost, EDcost
 end
