@@ -1,22 +1,5 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics
 
-DABidsSingle = Matrix(
-    CSV.read(
-        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageDABids.csv",
-        DataFrame,
-    ),
-)
-RTBidsSingle = Matrix(
-    CSV.read(
-        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageRTBids.csv",
-        DataFrame,
-    ),
-)
-DADBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
-DACBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
-RTDBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
-RTCBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
-
 # Read data from .jld2 file 
 params = STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES.jld2")
 model_filenames =
@@ -25,12 +8,12 @@ model_filenames =
 strategic = false
 RM = 0.03
 VOLL = 9000.0
-UCHorizon = Int(72) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
+UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(13) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
-NDay = 362
+NDay = 2
 
 EDSteps = Int(12) # number of 5-min intervals in a hour
-ESSeg = Int(1)
+ESSeg = Int(5)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
     outer = (1, 1, EDHorizon),
@@ -69,10 +52,10 @@ RTBidsSingle = Matrix(
         DataFrame,
     ),
 )
-DADBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
-DACBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
-RTDBids = repeat(DADBidsSingle', size(params.storagemap, 1), 1)
-RTCBids = repeat(DACBidsSingle', size(params.storagemap, 1), 1)
+DADBids = repeat(DABidsSingle[:,1]', size(params.storagemap, 1), 1)
+DACBids = repeat(DABidsSingle[:,2]', size(params.storagemap, 1), 1)
+RTDBids = repeat(RTBidsSingle[:,1]', size(params.storagemap, 1), 1)
+RTCBids = repeat(RTBidsSingle[:,2]', size(params.storagemap, 1), 1)
 
 bidmodels = STESTS.loadbidmodels(model_filenames)
 storagebidmodels =
