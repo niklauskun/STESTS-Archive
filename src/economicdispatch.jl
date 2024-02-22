@@ -25,6 +25,24 @@ function economicdispatch(
     # nrenewable = size(params.renewablemap, 1) # number of renewable generators
     nstorage = size(params.storagemap, 1) # number of storage units
 
+    ESegSOCini = Dict()
+
+    # Fill ESegSOCini
+    for i in 1:nstorage
+        excess_soc = params.ESOCini[i]
+        segment_increment = params.ESOC[i] / ESSeg  # Maximum increment per segment
+
+        for s in 1:ESSeg
+            if excess_soc > 0
+                increment = min(segment_increment, excess_soc)
+                ESegSOCini[i, s] = increment
+                excess_soc -= increment
+            else
+                ESegSOCini[i, s] = 0
+            end
+        end
+    end
+
     # Define model
     edmodel = Model()
 
@@ -186,6 +204,28 @@ function economicdispatch(
         totale[i, t] <= params.ESOC[i]
     )
 
+    @constraint(
+        edmodel,
+        SegStorageSOCCap[i = 1:nstorage, s = 1:ESSeg, t = 1:ntimepoints],
+        e[i, s, t] <= params.ESOC[i] / ESSeg
+    )
+
+    @constraint(
+        edmodel,
+        StorageSOCIni[i = 1:nstorage, s = 1:ESSeg],
+        e[i, s, 1] ==
+        ESegSOCini[i, s] + c[i, s, 1] * params.Eeta[i] / Steps -
+        d[i, s, 1] / params.Eeta[i] / Steps
+    )
+
+    @constraint(
+        edmodel,
+        StorageSOC[i = 1:nstorage, s = 1:ESSeg, t = 2:ntimepoints],
+        e[i, s, 1] ==
+        e[i, s, t-1] + c[i, s, 1] * params.Eeta[i] / Steps -
+        d[i, s, 1] / params.Eeta[i] / Steps
+    )
+
     # Storage SOC evolution constraints
     # @constraint(
     #     edmodel,
@@ -195,13 +235,13 @@ function economicdispatch(
     #     d[i, 1] / params.Eeta[i] / Steps
     # )
 
-    @constraint(
-        edmodel,
-        StorageSOCIni[i = 1:nstorage],
-        totale[i, 1] ==
-        params.ESOCini[i] + totalc[i, 1] * params.Eeta[i] / Steps -
-        totald[i, 1] / params.Eeta[i] / Steps
-    )
+    # @constraint(
+    #     edmodel,
+    #     StorageSOCIni[i = 1:nstorage],
+    #     totale[i, 1] ==
+    #     params.ESOCini[i] + totalc[i, 1] * params.Eeta[i] / Steps -
+    #     totald[i, 1] / params.Eeta[i] / Steps
+    # )
 
     # @constraint(
     #     edmodel,
@@ -211,13 +251,13 @@ function economicdispatch(
     #     d[i, t] / params.Eeta[i] / Steps
     # )
 
-    @constraint(
-        edmodel,
-        StorageSOC[i = 1:nstorage, t = 2:ntimepoints],
-        totale[i, t] ==
-        totale[i, t-1] + totalc[i, t] * params.Eeta[i] / Steps -
-        totald[i, t] / params.Eeta[i] / Steps
-    )
+    # @constraint(
+    #     edmodel,
+    #     StorageSOC[i = 1:nstorage, t = 2:ntimepoints],
+    #     totale[i, t] ==
+    #     totale[i, t-1] + totalc[i, t] * params.Eeta[i] / Steps -
+    #     totald[i, t] / params.Eeta[i] / Steps
+    # )
 
     # Conventional generator segment constraints
     @constraint(

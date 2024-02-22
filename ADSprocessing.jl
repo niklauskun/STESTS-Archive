@@ -7,7 +7,7 @@ using Interpolations
 RealTimeNoise = true
 # CurrentMix = true
 TransmissionCap = true
-DataName = "./data/ADS2032_7RegionNoise_4hrBES_5GWBES.jld2"
+DataName = "./data/ADS2032_7RegionNoise_4hrBES_5GWBES_Strategic.jld2"
 folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
 
 @info "Reading data from $folder..."
@@ -142,14 +142,17 @@ timereaddata = @elapsed begin
     storagemap = Matrix(
         CSV.read(joinpath(folder, "StorageMap_C.csv"), DataFrame)[:, 2:end],
     )
-    storagedata =
-        CSV.read(joinpath(folder, "Storage_C_4hr_5GW.csv"), DataFrame)
+    storagedata = CSV.read(
+        joinpath(folder, "Storage_C_4hr_5GW_Strategic.csv"),
+        DataFrame,
+    )
 
     EPC = -storagedata[!, :"MinCap(MW)"] # read storage charge capacity, in MW
     EPD = storagedata[!, :"MaxCap(MW)"] # read storage discharge capacity, in MW
     Eeta = storagedata[!, :"Efficiency"] # read storage efficiency
     ESOC = storagedata[!, :"MaxCap(MWh)"] # read storage state of charge capacity, in MWh
     ESOCini = 0.5 * ESOC # initial state of charge, in MWh
+    EStrategic = storagedata[!, :"Strategic"] # read storage strategic status
     @assert length(EPC) == size(storagemap, 1) "storage data length mismatch."
 
     # read demand data
@@ -204,6 +207,7 @@ timereaddata = @elapsed begin
     Eeta = convert(Vector{Float64}, Eeta)
     ESOC = convert(Vector{Float64}, ESOC)
     ESOCini = convert(Vector{Float64}, ESOCini)
+    EStrategic = convert(Vector{Int64}, EStrategic)
     UCL = convert(Matrix{Float64}, UCL)
 
     if RealTimeNoise == true
@@ -387,6 +391,8 @@ timereaddata = @elapsed begin
         ESOC,
         "ESOCini",
         ESOCini,
+        "EStrategic",
+        EStrategic,
         "UCL",
         UCL,
         "EDL",

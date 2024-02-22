@@ -1,7 +1,7 @@
 using JLD2
 using DataFrames
 
-struct ModelParams
+mutable struct ModelParams
     UCL::Matrix{Float64}
     genmap::Matrix{Int64}
     GPmax::Vector{Float64}
@@ -32,6 +32,7 @@ struct ModelParams
     Eeta::Vector{Float64}
     ESOC::Vector{Float64}
     ESOCini::Vector{Float64}
+    EStrategic::Vector{Int64}
     EDL::Matrix{Float64}
     EDHAvail::Matrix{Float64}
     # EDRAvail::Matrix{Float64}
@@ -83,6 +84,7 @@ function read_jld2(filename::String)
     Eeta = data["Eeta"]
     ESOC = data["ESOC"]
     ESOCini = data["ESOCini"]
+    EStrategic = data["EStrategic"]
     EDL = data["EDL"]
     EDHAvail = data["EDHAvail"]
     # EDRAvail = data["EDRAvail"]
@@ -119,6 +121,7 @@ function read_jld2(filename::String)
         Eeta,
         ESOC,
         ESOCini,
+        EStrategic,
         EDL,
         EDHAvail,
         # EDRAvail,

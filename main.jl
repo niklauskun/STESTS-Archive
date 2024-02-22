@@ -1,19 +1,33 @@
-using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics
+using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
 # Read data from .jld2 file 
-params = STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES.jld2")
-model_filenames =
-    ["models/WEST_1.jld2", "models/WEST_2.jld2", "models/WEST_3.jld2"]
+params =
+    STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES_Strategic.jld2")
+params2 = STESTS.read_jld2(
+    "./data/ADS2032_7RegionNoise_4hrBES_5GWBES_StrategicTest.jld2",
+)
+model_filenames = ["models/4hrmodel1_5.jld2"]
+# for i in eachindex(params.Eeta)
+#     if params.Eeta[i] == 0.8
+#         params.EStrategic[i] = 0
+#     elseif params.Eeta[i] == 0.9
+#         params.EStrategic[i] = 1
+#     else
+#         # Handle unexpected case, if necessary
+#         println("Unexpected value in params.Eeta at index $i: ", params.Eeta[i])
+#     end
+# end
 
-strategic = false
+strategic = true
+ratio = 0.5
 RM = 0.03
 VOLL = 9000.0
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-EDHorizon = Int(13) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
-NDay = 2
+EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
+NDay = 364
 
 EDSteps = Int(12) # number of 5-min intervals in a hour
-ESSeg = Int(5)
+ESSeg = Int(1)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
     outer = (1, 1, EDHorizon),
@@ -23,7 +37,7 @@ ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
 
 output_folder =
-    "output/DecUpdate/UC" *
+    "output/Strategic/UC" *
     "$UCHorizon" *
     "ED" *
     "$EDHorizon" *
@@ -37,8 +51,17 @@ output_folder =
     "$FuelAdjustment" *
     "_Error" *
     "$ErrorAdjustment" *
-    "_5GWBES_1yr_emergency"
+    "_ratio" *
+    "$ratio" *
+    "_MIP0.1_HisBid"
 mkpath(output_folder)
+mkpath(output_folder * "/Strategic")
+mkpath(output_folder * "/NStrategic")
+
+# Update strategic storage scale base on set ratio
+if strategic == true
+    STESTS.update_battery_storage!(params, ratio, output_folder)
+end
 
 DABidsSingle = Matrix(
     CSV.read(
@@ -52,14 +75,17 @@ RTBidsSingle = Matrix(
         DataFrame,
     ),
 )
-DADBids = repeat(DABidsSingle[:,1]', size(params.storagemap, 1), 1)
-DACBids = repeat(DABidsSingle[:,2]', size(params.storagemap, 1), 1)
-RTDBids = repeat(RTBidsSingle[:,1]', size(params.storagemap, 1), 1)
-RTCBids = repeat(RTBidsSingle[:,2]', size(params.storagemap, 1), 1)
+DADBids = repeat(DABidsSingle[:, 1]', size(params.storagemap, 1), 1)
+DACBids = repeat(DABidsSingle[:, 2]', size(params.storagemap, 1), 1)
+RTDBids = repeat(RTBidsSingle[:, 1]', size(params.storagemap, 1), 1)
+RTCBids = repeat(RTBidsSingle[:, 2]', size(params.storagemap, 1), 1)
 
 bidmodels = STESTS.loadbidmodels(model_filenames)
-storagebidmodels =
-    STESTS.assign_models_to_storages(bidmodels, size(params.storagemap, 1))
+storagebidmodels = STESTS.assign_models_to_storages(
+    params,
+    bidmodels,
+    size(params.storagemap, 1),
+)
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
@@ -145,3 +171,19 @@ end
 
 println("The UC cost is: ", sum(UCcost))
 println("The ED cost is: ", sum(EDcost))
+
+opt = SendOptions(
+    isSSL = true,
+    username = "3140100275@zju.edu.cn",
+    passwd = "lsl1118!",
+)
+url = "smtps://smtp.zju.edu.cn:994"
+to = ["<nz2343@columbia.edu>"]
+from = "<3140100275@zju.edu.cn>"
+
+subject = "Julia Process Finished"
+message = "Your Julia code has finished running."
+
+body = get_body(to, from, subject, message)
+
+resp = send(url, to, from, body, opt)
