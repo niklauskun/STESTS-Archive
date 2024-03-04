@@ -48,6 +48,7 @@ function solving(
     EDSteps::Int = 12,
     VOLL::Float64 = 9000.0,
     RM::Float64 = 0.03,
+    FuelAdjustment::Float64 = 1.0,
     ErrorAdjustment::Float64 = 1.0,
     LoadAdjustment::Float64 = 1.0,
 )
@@ -72,7 +73,11 @@ function solving(
     GPIniInput = params.GPIni
     all_UCprices_df = DataFrame()
     all_EDprices_df = DataFrame()
-    vda = Array{Float64}(
+    EDprice24 = Array{Float64}(undef, 24, size(params.storagemap, 2))
+    vda = Array{Float64}(undef, size(params.storagemap, 1), 24 + 1)
+    DAdb = Array{Float64}(undef, size(params.storagemap, 1), 24 + 1)
+    DAcb = Array{Float64}(undef, size(params.storagemap, 1), 24 + 1)
+    vrt = Array{Float64}(
         undef,
         size(params.storagemap, 1),
         ESSeg,
@@ -114,10 +119,46 @@ function solving(
             Matrix{Float64},
             params.WAvail[24*(d-1)+1:24*d+UCHorizon-24, :]',
         )
-        DADBidsInput =
-            convert(Matrix{Float64}, DADBids[:, 24*(d-1)+1:24*d+UCHorizon-24])
-        DACBidsInput =
-            convert(Matrix{Float64}, DACBids[:, 24*(d-1)+1:24*d+UCHorizon-24])
+        if d == 1
+            DAdb = convert(
+                Matrix{Float64},
+                DADBids[:, 24*(d-1)+1:24*d+UCHorizon-24],
+            )
+            DAcb = convert(
+                Matrix{Float64},
+                DACBids[:, 24*(d-1)+1:24*d+UCHorizon-24],
+            )
+        else
+            # generate non-strategic DA bids
+            EDprice288 = all_EDprices_df[(end-287):end, :] .* EDSteps
+            for col in 1:7
+                EDprice24[:, col] =
+                    mean(reshape(EDprice288[!, col], 12, :), dims = 1)
+            end
+            for i in axes(DADBids, 1)
+                vda[i, :] = generate_value_function(
+                    24,
+                    params.EPD[i] / params.ESOC[i],
+                    params.Eeta[i],
+                    1,
+                    EDprice24 * params.storagemap[i, :],
+                )
+                DAdb[i, :] = vda[i, :] / params.Eeta[i] .+ 10.0
+                DAcb[i, :] = -vda[i, :] .* params.Eeta[i]
+            end
+        end
+        DAdbdf = DataFrame(DAdb', :auto)
+        CSV.write(
+            joinpath(output_folder, "UCESDBids.csv"),
+            DAdbdf,
+            append = true,
+        )
+        DAcbdf = DataFrame(DAcb', :auto)
+        CSV.write(
+            joinpath(output_folder, "UCESCBids.csv"),
+            DAcbdf,
+            append = true,
+        )
         for h in 1:UCHorizon
             # set_normalized_rhs(ucmodel[:Reserve][h], (1 + 0.2) * sum(DInput[:, h])-sum(HAvailInput[:, h])-sum(RAvailInput[:, h]))
             for z in axes(LInput, 1)
@@ -152,22 +193,22 @@ function solving(
                 set_objective_coefficient(
                     ucmodel,
                     ucmodel[:d][i, h],
-                    DADBidsInput[i, h],
+                    DAdb[i, h],
                 )
                 set_objective_coefficient(
                     ucmodel,
                     ucmodel[:c][i, h],
-                    -DACBidsInput[i, h],
+                    DAcb[i, h],
                 )
                 set_objective_coefficient(
                     ucpmodel,
                     ucpmodel[:d][i, h],
-                    DADBidsInput[i, h],
+                    DAdb[i, h],
                 )
                 set_objective_coefficient(
                     ucpmodel,
                     ucpmodel[:c][i, h],
-                    -DACBidsInput[i, h],
+                    DAcb[i, h],
                 )
             end
         end
@@ -178,14 +219,17 @@ function solving(
 
         # Extract solution and solve economic dispatch model
         if termination_status(ucmodel) == MOI.OPTIMAL
-            GMCcost[d] = sum(value.(ucmodel[:guc])[:, 1:24] .* params.GMC)
-            GSMCcost[d] =
-                sum(value.(ucmodel[:gucs])[:, :, 1:24] .* GSMC[:, :, 1:24])
+            GMCcost[d] = sum(
+                value.(ucmodel[:guc])[:, 1:24] .* params.GMC * FuelAdjustment,
+            )
+            GSMCcost[d] = sum(
+                value.(ucmodel[:gucs])[:, :, 1:24] .* GSMC[:, :, 1:24] *
+                FuelAdjustment,
+            )
             VOLLcost[d] = sum(value.(ucmodel[:s])[1:24] .* VOLL)
-            # todo!!! update bids
             EScost[d] = sum(
-                value.(ucmodel[:d])[:, 1:24] .* DADBids[:, 1:24] -
-                value.(ucmodel[:c])[:, 1:24] .* DACBids[:, 1:24],
+                value.(ucmodel[:d])[:, 1:24] .* DAdb[:, 1:24] -
+                value.(ucmodel[:c])[:, 1:24] .* DAcb[:, 1:24],
             )
             UCcost[d] =
                 GMCcost[d] +
@@ -193,7 +237,8 @@ function solving(
                 VOLLcost[d] +
                 EScost[d] +
                 sum(
-                    value.(ucmodel[:u])[:, 1:24] .* params.GNLC +
+                    value.(ucmodel[:u])[:, 1:24] .* params.GNLC *
+                    FuelAdjustment +
                     value.(ucmodel[:v])[:, 1:24] .* params.GSUC,
                 )
             # UCcost[d] = objective_value(ucmodel)
@@ -366,10 +411,10 @@ function solving(
             all_UCprices_df = vcat(all_UCprices_df, UCpricedf)
             UCprice288 = repeat(UCprice', inner = (EDSteps, 1))
 
-            # generate non-strategic bids
+            # generate non-strategic RT bids
             for i in axes(RTDBids, 1)
-                vda[i, :, :] = generate_value_function(
-                    1 / EDSteps,
+                vrt[i, :, :] = generate_value_function(
+                    288,
                     params.EPD[i] / params.ESOC[i] / EDSteps,
                     params.Eeta[i],
                     ESSeg,
@@ -458,28 +503,21 @@ function solving(
                                 # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
                                 # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
                             end
-                            # TODO
-                            # for i in axes(params.ESOCini, 1)
-                            #     set_normalized_rhs(
-                            #         edmodel[:StorageSOCIni][i],
-                            #         params.ESOCini[i],
-                            #     )
-                            # end
                         end
 
                         # update energy storage bids
                         # update bids base on historical bids
                         for i in axes(RTDBids, 1)
-                            db[i, :] .= EDDBidInput[i, tp] / EDSteps
-                            cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
-                            # db[i, :] =
-                            #     (
-                            #         vda[i, :, (h-1)*EDSteps+t] ./
-                            #         params.Eeta[i] .+ 10.0
-                            #     ) / EDSteps
-                            # cb[i, :] =
-                            #     -vda[i, :, (h-1)*EDSteps+t] .* params.Eeta[i] /
-                            #     EDSteps
+                            # db[i, :] .= EDDBidInput[i, tp] / EDSteps
+                            # cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
+                            db[i, :] =
+                                (
+                                    vrt[i, :, (h-1)*EDSteps+t] ./
+                                    params.Eeta[i] .+ 10.0
+                                ) / EDSteps
+                            cb[i, :] =
+                                -vrt[i, :, (h-1)*EDSteps+t] .* params.Eeta[i] /
+                                EDSteps
                             # db[i, :] .=
                             #     (
                             #         params.storagemap[i, :]' * UCprice[:, h] /
@@ -524,16 +562,16 @@ function solving(
                         if strategic == true
                             for (i, model) in bidmodels
                                 if d == 1
-                                    db[i, :] .= EDDBidInput[i, tp] / EDSteps
-                                    cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
-                                    # db[i, :] =
-                                    #     (
-                                    #         vda[i, :, (h-1)*EDSteps+t] ./
-                                    #         params.Eeta[i] .+ 10.0
-                                    #     ) / EDSteps
-                                    # cb[i, :] =
-                                    #     -vda[i, :, (h-1)*EDSteps+t] .*
-                                    #     params.Eeta[i] / EDSteps
+                                    # db[i, :] .= EDDBidInput[i, tp] / EDSteps
+                                    # cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
+                                    db[i, :] =
+                                        (
+                                            vrt[i, :, (h-1)*EDSteps+t] ./
+                                            params.Eeta[i] .+ 10.0
+                                        ) / EDSteps
+                                    cb[i, :] =
+                                        -vrt[i, :, (h-1)*EDSteps+t] .*
+                                        params.Eeta[i] / EDSteps
                                     # db[i, :] .=
                                     #     (
                                     #         params.storagemap[i, :]' *
@@ -574,7 +612,6 @@ function solving(
                                         cb[i, s],
                                     )
                                 end
-                                # TODO: for single strategic storage now
                                 cbdf = DataFrame(12 * cb[i, :]', :auto)
                                 dbdf = DataFrame(12 * db[i, :]', :auto)
                                 CSV.write(
@@ -665,31 +702,24 @@ function solving(
                     # # Extract solution
                     if termination_status(edmodel) == MOI.OPTIMAL
                         EDGMCcost[ts] =
-                            sum(value.(edmodel[:guc])[:, 1] .* params.GMC) /
-                            EDSteps
+                            sum(
+                                value.(edmodel[:guc])[:, 1] .* params.GMC *
+                                FuelAdjustment,
+                            ) / EDSteps
                         EDGSMCcost[ts] =
                             sum(
                                 value.(edmodel[:gucs])[:, :, 1] .*
-                                EDGSMC[:, :, 1],
+                                EDGSMC[:, :, 1] * FuelAdjustment,
                             ) / EDSteps
                         EDVOLL[ts] =
                             sum(
                                 value.(edmodel[:s])[:, :, 1] .*
                                 PriceCap[:, :, 1],
                             ) / EDSteps
-                        # todo!!! update bidmodel
-                        # EDEScost[ts] =
-                        #     sum(
-                        #         value.(edmodel[:d])[:, :, 1] .*
-                        #         RTDBids[:, (h-1)*EDSteps+t] -
-                        #         value.(edmodel[:c])[:, :, 1] .*
-                        #         RTCBids[:, (h-1)*EDSteps+t],
-                        #     ) / EDSteps
+                        # TODO update bid cost
                         EDEScost[ts] = sum(
-                            value.(edmodel[:d])[:, :, 1] .*
-                            (EDDBidInput[:, 1] / EDSteps) -
-                            value.(edmodel[:c])[:, :, 1] .*
-                            (EDCBidInput[:, 1] / EDSteps),
+                            value.(edmodel[:d])[:, :, 1] .* db[:, :] +
+                            value.(edmodel[:c])[:, :, 1] .* cb[:, :],
                         )
                         EDcost[ts] =
                             EDGMCcost[ts] +
@@ -697,8 +727,8 @@ function solving(
                             EDVOLL[ts] +
                             EDEScost[ts] +
                             sum(
-                                EDU[:, (h-1)*EDSteps+t] .* params.GNLC /
-                                EDSteps +
+                                EDU[:, (h-1)*EDSteps+t] .* params.GNLC *
+                                FuelAdjustment / EDSteps +
                                 EDV[:, (h-1)*EDSteps+t] .* params.GSUC,
                             )
                         EDGPIni = value.(edmodel[:guc])[:, 1]
@@ -916,7 +946,6 @@ function solving(
                             # )
                         end
 
-                        # TODO: update initial storage SOC
                         for i in axes(EDSOCini, 1)
                             set_normalized_rhs(
                                 ucmodel[:StorageSOCIni][i],

@@ -147,7 +147,7 @@ function update_battery_storage!(
     return params
 end
 
-function CalcValueNoUnc(d, c, P, eta, vi, ed, iC, iD)
+function CalcValueNoUnc(d, c, eta, vi, iC, iD)
     """
     ####### Completely translated to Julia, gave exact numbers to Python #######
 
@@ -155,12 +155,9 @@ function CalcValueNoUnc(d, c, P, eta, vi, ed, iC, iD)
     Inputs:
         d - price right now
         c - marginal discharge cost
-        P - power rating w.r.t to energy rating and sampling time,
-        i.e., 2hr duration battery with 5min resolution -> P = (1/2)/12 
         eta - efficiency
         vi - input value function for the next time period, which equals to
         v_t(e) where e is sampled from 0 to 1 at the granularity e
-        ed - granularity at which vi is sampled, in p.u. to energy rating
     Outputs:
         vo - value function for the current time period sampled at ed
     """
@@ -198,7 +195,7 @@ function CalcValueNoUnc(d, c, P, eta, vi, ed, iC, iD)
 end
 
 function generate_value_function(
-    Ts,
+    T,
     P,
     eta,
     num_segment,
@@ -207,7 +204,6 @@ function generate_value_function(
     ed = 0.001,
     Ne = 1001,
     ef = 0.5,
-    T = 288,
 )
     """
     ####### Completely translated to Julia, gave exact numbers to Python #######
@@ -242,7 +238,7 @@ function generate_value_function(
     # Populate value function
     for t in T:-1:1 # start from the last day and move backwards
         vi = v[:, t+1] # input value function of next time stamp
-        vo = CalcValueNoUnc(RTP[t], c, P, eta, vi, ed, iC, iD)
+        vo = CalcValueNoUnc(RTP[t], c, eta, vi, iC, iD)
         v[:, t] = vo # record the result
     end
 

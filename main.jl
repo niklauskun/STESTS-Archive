@@ -3,9 +3,6 @@ using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 # Read data from .jld2 file 
 params =
     STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES_Strategic.jld2")
-params2 = STESTS.read_jld2(
-    "./data/ADS2032_7RegionNoise_4hrBES_5GWBES_StrategicTest.jld2",
-)
 model_filenames = ["models/4hrmodel1_5.jld2"]
 # for i in eachindex(params.Eeta)
 #     if params.Eeta[i] == 0.8
@@ -24,7 +21,7 @@ RM = 0.03
 VOLL = 9000.0
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
-NDay = 364
+NDay = 2
 
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
@@ -53,7 +50,7 @@ output_folder =
     "$ErrorAdjustment" *
     "_ratio" *
     "$ratio" *
-    "_MIP0.1_HisBid"
+    "_MIP0.1_DARTDP"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
@@ -163,6 +160,7 @@ timesolve = @elapsed begin
         EDSteps = EDSteps,
         VOLL = VOLL,
         RM = RM,
+        FuelAdjustment = FuelAdjustment,
         ErrorAdjustment = ErrorAdjustment,
         LoadAdjustment = LoadAdjustment,
     )
