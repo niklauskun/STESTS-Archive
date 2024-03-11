@@ -34,6 +34,7 @@ end
 
 function assign_models_to_storages(params, models, num_storages)
     storage_to_model_map = []
+    storage_to_index_map = []
 
     model_keys = collect(keys(models))  # Get the keys of the models dictionary to choose from
 
@@ -46,8 +47,11 @@ function assign_models_to_storages(params, models, num_storages)
                 storage_to_model_map,
                 (storage_id, models[selected_model_key]),
             )
+            push!(storage_to_index_map, (storage_id, selected_model_index)) # Track storage_id and model index
         end
     end
+    df = DataFrame(StorageID = first.(storage_to_index_map), SelectedModelIndex = last.(storage_to_index_map))
+    CSV.write("storage_to_index_map.csv", df)
 
     return storage_to_model_map
 end
