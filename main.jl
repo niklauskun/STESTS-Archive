@@ -3,28 +3,30 @@ using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 # Read data from .jld2 file 
 params =
     STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES_Strategic.jld2")
-model_filenames = ["models/4hrmodel1_5.jld2"]
-# for i in eachindex(params.Eeta)
-#     if params.Eeta[i] == 0.8
-#         params.EStrategic[i] = 0
-#     elseif params.Eeta[i] == 0.9
-#         params.EStrategic[i] = 1
-#     else
-#         # Handle unexpected case, if necessary
-#         println("Unexpected value in params.Eeta at index $i: ", params.Eeta[i])
-#     end
-# end
+model_filenames = ["models/BAW0EDH13/4hrmodel1_5Seg.jld2"]
+# model_filenames = [
+#     "models/4hrmodel1_5.jld2",
+#     "models/4hrmodel2_5.jld2",
+#     "models/4hrmodel3_5.jld2",
+#     "models/4hrmodel4_5.jld2",
+#     "models/4hrmodel5_5.jld2",
+#     "models/4hrmodel6_5.jld2",
+#     "models/4hrmodel7_5.jld2",
+#     "models/4hrmodel8_5.jld2",
+#     "models/4hrmodel9_5.jld2",
+#     "models/4hrmodel10_5.jld2",
+# ]
 
 strategic = true
-ratio = 0.5
+ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
+NDay = 364
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
-NDay = 2
-
+EDHorizon = Int(13) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
+BAWindow = Int(0) # bid-ahead window (number of 5-min intervals, 12-1hr, 48-4hr)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
     outer = (1, 1, EDHorizon),
@@ -50,14 +52,32 @@ output_folder =
     "$ErrorAdjustment" *
     "_ratio" *
     "$ratio" *
-    "_MIP0.1_DARTDP"
+    "_BAW" *
+    "$BAWindow" *
+    "_MIP0.1_DARTDP_"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
 
 # Update strategic storage scale base on set ratio
 if strategic == true
-    STESTS.update_battery_storage!(params, ratio, output_folder)
+    if ratio == 1.0
+        for i in eachindex(params.Eeta)
+            if params.Eeta[i] == 0.8
+                params.EStrategic[i] = 0
+            elseif params.Eeta[i] == 0.9
+                params.EStrategic[i] = 1
+            else
+                # Handle unexpected case, if necessary
+                println(
+                    "Unexpected value in params.Eeta at index $i: ",
+                    params.Eeta[i],
+                )
+            end
+        end
+    else
+        STESTS.update_battery_storage!(params, ratio, output_folder)
+    end
 end
 
 DABidsSingle = Matrix(
@@ -158,6 +178,7 @@ timesolve = @elapsed begin
         UCHorizon = UCHorizon,
         EDHorizon = EDHorizon,
         EDSteps = EDSteps,
+        BAWindow = BAWindow,
         VOLL = VOLL,
         RM = RM,
         FuelAdjustment = FuelAdjustment,

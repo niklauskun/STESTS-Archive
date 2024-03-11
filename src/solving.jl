@@ -46,6 +46,7 @@ function solving(
     UCHorizon::Int = 24,
     EDHorizon::Int = 1,
     EDSteps::Int = 12,
+    BAWindow::Int = 0,
     VOLL::Float64 = 9000.0,
     RM::Float64 = 0.03,
     FuelAdjustment::Float64 = 1.0,
@@ -461,7 +462,11 @@ function solving(
                         convert(Matrix{Float64}, RTCBids[:, ts:ts+EDHorizon-1])
                     if d > 1
                         last_24_UC = all_UCprices_df[(end-48+h):(end-25+h), :]
-                        last_36_ED = all_EDprices_df[(end-35):end, :] .* EDSteps
+                        last_36_ED =
+                            all_EDprices_df[
+                                (end-35-BAWindow):end-BAWindow,
+                                :,
+                            ] .* EDSteps
                         predictors = vcat(last_24_UC, last_36_ED)
                     end
                     for tp in 1:EDHorizon
@@ -539,24 +544,26 @@ function solving(
                                     cb[i, s],
                                 )
                             end
-                            cbdf = DataFrame(12 * cb[i, :]', :auto)
-                            dbdf = DataFrame(12 * db[i, :]', :auto)
-                            CSV.write(
-                                joinpath(
-                                    output_folder * "/NStrategic",
-                                    "EDESCB*" * "$i" * ".csv",
-                                ),
-                                cbdf,
-                                append = true,
-                            )
-                            CSV.write(
-                                joinpath(
-                                    output_folder * "/NStrategic",
-                                    "EDESDB*" * "$i" * ".csv",
-                                ),
-                                dbdf,
-                                append = true,
-                            )
+                            if tp == 1
+                                cbdf = DataFrame(12 * cb[i, :]', :auto)
+                                dbdf = DataFrame(12 * db[i, :]', :auto)
+                                CSV.write(
+                                    joinpath(
+                                        output_folder * "/NStrategic",
+                                        "EDESCB_" * "$i" * ".csv",
+                                    ),
+                                    cbdf,
+                                    append = true,
+                                )
+                                CSV.write(
+                                    joinpath(
+                                        output_folder * "/NStrategic",
+                                        "EDESDB_" * "$i" * ".csv",
+                                    ),
+                                    dbdf,
+                                    append = true,
+                                )
+                            end
                         end
                         # update bids for strategic energy storage
                         if strategic == true
@@ -612,24 +619,26 @@ function solving(
                                         cb[i, s],
                                     )
                                 end
-                                cbdf = DataFrame(12 * cb[i, :]', :auto)
-                                dbdf = DataFrame(12 * db[i, :]', :auto)
-                                CSV.write(
-                                    joinpath(
-                                        output_folder * "/Strategic",
-                                        "EDESCB*" * "$i" * ".csv",
-                                    ),
-                                    cbdf,
-                                    append = true,
-                                )
-                                CSV.write(
-                                    joinpath(
-                                        output_folder * "/Strategic",
-                                        "EDESDB*" * "$i" * ".csv",
-                                    ),
-                                    dbdf,
-                                    append = true,
-                                )
+                                if tp == 1
+                                    cbdf = DataFrame(12 * cb[i, :]', :auto)
+                                    dbdf = DataFrame(12 * db[i, :]', :auto)
+                                    CSV.write(
+                                        joinpath(
+                                            output_folder * "/Strategic",
+                                            "EDESCB_" * "$i" * ".csv",
+                                        ),
+                                        cbdf,
+                                        append = true,
+                                    )
+                                    CSV.write(
+                                        joinpath(
+                                            output_folder * "/Strategic",
+                                            "EDESDB_" * "$i" * ".csv",
+                                        ),
+                                        dbdf,
+                                        append = true,
+                                    )
+                                end
                             end
                         end
 
