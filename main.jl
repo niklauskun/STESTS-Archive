@@ -23,7 +23,7 @@ RM = 0.03
 VOLL = 9000.0
 NDay = 364
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-EDHorizon = Int(13) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
+EDHorizon = Int(6) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
 BAWindow = Int(0) # bid-ahead window (number of 5-min intervals, 12-1hr, 48-4hr)
@@ -54,7 +54,7 @@ output_folder =
     "$ratio" *
     "_BAW" *
     "$BAWindow" *
-    "_MIP0.1_DARTDP_"
+    "_MIP0.1_DARTDP"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
@@ -190,19 +190,3 @@ end
 
 println("The UC cost is: ", sum(UCcost))
 println("The ED cost is: ", sum(EDcost))
-
-opt = SendOptions(
-    isSSL = true,
-    username = "3140100275@zju.edu.cn",
-    passwd = "lsl1118!",
-)
-url = "smtps://smtp.zju.edu.cn:994"
-to = ["<nz2343@columbia.edu>"]
-from = "<3140100275@zju.edu.cn>"
-
-subject = "Julia Process Finished"
-message = "Your Julia code has finished running."
-
-body = get_body(to, from, subject, message)
-
-resp = send(url, to, from, body, opt)
