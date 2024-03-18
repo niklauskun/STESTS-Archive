@@ -2,56 +2,149 @@
 
 using Flux, JLD2, Random
 
+# function loadbidmodels(
+#     model_filenames;
+#     input_size = 60,
+#     dense_size = 60,
+#     output_size = 5,
+#     activation_fn = relu,
+# )
+#     models = Dict{String,Chain}()
+
+#     for filename in model_filenames
+#         jldopen(filename, "r") do file
+#             # Define the model architecture and create a model
+# model = Chain(
+#     Dense(input_size, dense_size, activation_fn),
+#     Dense(dense_size, dense_size, activation_fn),
+#     Dense(dense_size, output_size),
+# )
+
+#             # Load the model state from the JLD2 file
+#             model_state = file["model_state"]
+#             Flux.loadmodel!(model, model_state)
+
+#             # Store the loaded model in the dictionary with filename as key
+#             return models[filename] = model
+#         end
+#     end
+
+#     return models
+# end
+
 function loadbidmodels(
-    model_filenames;
+    base_folder;
     input_size = 60,
     dense_size = 60,
     output_size = 5,
     activation_fn = relu,
 )
-    models = Dict{String,Chain}()
+    models = Dict{String,Dict{String,Chain}}()
 
-    for filename in model_filenames
-        jldopen(filename, "r") do file
-            # Define the model architecture and create a model
-            model = Chain(
-                Dense(input_size, dense_size, activation_fn),
-                Dense(dense_size, dense_size, activation_fn),
-                Dense(dense_size, output_size),
-            )
+    for region in 1:6  # Assuming Region7 has no storage
+        region_folder = joinpath(base_folder, "Region$(region)")
+        region_models = Dict{String,Chain}()
 
-            # Load the model state from the JLD2 file
-            model_state = file["model_state"]
-            Flux.loadmodel!(model, model_state)
+        for filename in readdir(region_folder, join = true)
+            if occursin(r"\.jld2$", filename)  # Ensure it's a JLD2 file
+                jldopen(filename, "r") do file
+                    model = Chain(
+                        Dense(input_size, dense_size, activation_fn),
+                        Dense(dense_size, dense_size, activation_fn),
+                        Dense(dense_size, output_size),
+                    )
 
-            # Store the loaded model in the dictionary with filename as key
-            return models[filename] = model
+                    # Load the model state from the JLD2 file
+                    model_state = file["model_state"]
+                    Flux.loadmodel!(model, model_state)
+
+                    return region_models[basename(filename)] = model
+                end
+            end
         end
+
+        models["Region$(region)"] = region_models
     end
 
     return models
 end
 
-function assign_models_to_storages(params, models, num_storages)
+# function assign_models_to_storages(params, models, num_storages, output_folder)
+#     storage_to_model_map = []
+#     storage_to_index_map = []
+
+#     model_keys = collect(keys(models))  # Get the keys of the models dictionary to choose from
+
+#     for storage_id in 1:num_storages
+#         if params.EStrategic[storage_id] == 1
+#             # Select a model for this storage in a round-robin fashion
+#             selected_model_index = ((storage_id - 1) % length(model_keys)) + 1
+#             selected_model_key = model_keys[selected_model_index]
+#             push!(
+#                 storage_to_model_map,
+#                 (storage_id, models[selected_model_key]),
+#             )
+#             push!(storage_to_index_map, (storage_id, selected_model_index)) # Track storage_id and model index
+#         end
+#     end
+#     df = DataFrame(
+#         StorageID = first.(storage_to_index_map),
+#         SelectedModelIndex = last.(storage_to_index_map),
+#     )
+#     CSV.write(
+#         joinpath(output_folder * "/Strategic", "storage_to_index_map.csv"),
+#         df,
+#     )
+
+#     return storage_to_model_map
+# end
+
+function assign_models_to_storages(params, models, num_storages, output_folder)
     storage_to_model_map = []
     storage_to_index_map = []
 
-    model_keys = collect(keys(models))  # Get the keys of the models dictionary to choose from
+    # Initialize a dictionary to keep track of the last model index used for each region
+    last_model_index_used = Dict{String,Int}()
 
     for storage_id in 1:num_storages
         if params.EStrategic[storage_id] == 1
-            # Select a model for this storage in a round-robin fashion
-            selected_model_index = ((storage_id - 1) % length(model_keys)) + 1
-            selected_model_key = model_keys[selected_model_index]
-            push!(
-                storage_to_model_map,
-                (storage_id, models[selected_model_key]),
-            )
-            push!(storage_to_index_map, (storage_id, selected_model_index)) # Track storage_id and model index
+            region_idx =
+                findfirst(x -> x == 1, params.storagemap[storage_id, 1:6])
+            if region_idx !== nothing
+                region_key = "Region$(region_idx)"
+                # Initialize or increment the model index for this region
+                last_model_index_used[region_key] =
+                    get(last_model_index_used, region_key, 0) + 1
+
+                model_keys = collect(keys(models[region_key]))
+                num_models = length(model_keys)
+                # Ensure the model index loops back to the start if it exceeds the number of models available
+                selected_model_index =
+                    (last_model_index_used[region_key] - 1) % num_models + 1
+                selected_model_key = model_keys[selected_model_index]
+
+                push!(
+                    storage_to_model_map,
+                    (storage_id, models[region_key][selected_model_key]),
+                )
+                push!(
+                    storage_to_index_map,
+                    (storage_id, selected_model_index, region_idx),
+                )  # Include region info
+            end
         end
     end
-    df = DataFrame(StorageID = first.(storage_to_index_map), SelectedModelIndex = last.(storage_to_index_map))
-    CSV.write("storage_to_index_map.csv", df)
+
+    # Create DataFrame with an additional column for region
+    df = DataFrame(
+        StorageID = first.(storage_to_index_map),
+        SelectedModelIndex = getindex.(storage_to_index_map, 2),
+        Region = getindex.(storage_to_index_map, 3),
+    )
+    CSV.write(
+        joinpath(output_folder * "/Strategic", "storage_to_index_map.csv"),
+        df,
+    )
 
     return storage_to_model_map
 end

@@ -2,22 +2,9 @@ using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
 # Read data from .jld2 file 
 params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS.jld2")
-model_filenames = ["models/BAW0EDH13/4hrmodel1_5Seg.jld2"]
-# model_filenames = [
-#     "models/4hrmodel1_5.jld2",
-#     "models/4hrmodel2_5.jld2",
-#     "models/4hrmodel3_5.jld2",
-#     "models/4hrmodel4_5.jld2",
-#     "models/4hrmodel5_5.jld2",
-#     "models/4hrmodel6_5.jld2",
-#     "models/4hrmodel7_5.jld2",
-#     "models/4hrmodel8_5.jld2",
-#     "models/4hrmodel9_5.jld2",
-#     "models/4hrmodel10_5.jld2",
-# ]
 
 strategic = true
-ratio = 1.0
+ratio = 0.9
 RM = 0.03
 VOLL = 9000.0
 NDay = 2
@@ -25,7 +12,7 @@ UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours f
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
-ESMC = 10.0
+ESMC = 30.0
 BAWindow = Int(0) # bid-ahead window (number of 5-min intervals, 12-1hr, 48-4hr)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
@@ -42,22 +29,30 @@ output_folder =
     "$EDHorizon" *
     "_Strategic_" *
     "$strategic" *
-    "_Seg" *
-    "$ESSeg" *
-    "_Load" *
-    "$LoadAdjustment" *
-    "_Fuel" *
-    "$FuelAdjustment" *
-    "_Error" *
-    "$ErrorAdjustment" *
     "_ratio" *
     "$ratio" *
+    "_Seg" *
+    "$ESSeg" *
     "_BAW" *
     "$BAWindow" *
-    "_MIP0.1_DARTDP_testhydro2"
+    "_MC" *
+    "$ESMC" *
+    "testmodelassign2"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
+
+model_filenames = [
+    "models/BAW" *
+    "$BAWindow" *
+    "EDH" *
+    "$EDHorizon" *
+    "MC" *
+    "$ESMC" *
+    "/Region1/4hrmodel1_5Seg.jld2",
+]
+model_base_folder =
+    "models/BAW" * "$BAWindow" * "EDH" * "$EDHorizon" * "MC" * "$ESMC"
 
 # Update strategic storage scale base on set ratio
 if strategic == true
@@ -75,9 +70,20 @@ if strategic == true
                 )
             end
         end
+        if ratio == 0.0
+            println("No AI-Powered BES.")
+        end
     else
         STESTS.update_battery_storage!(params, ratio, output_folder)
     end
+    # bidmodels = STESTS.loadbidmodels(model_filenames)
+    bidmodels = STESTS.loadbidmodels(model_base_folder)
+    storagebidmodels = STESTS.assign_models_to_storages(
+        params,
+        bidmodels,
+        size(params.storagemap, 1),
+        output_folder,
+    )
 end
 
 DABidsSingle = Matrix(
@@ -96,13 +102,6 @@ DADBids = repeat(DABidsSingle[:, 1]', size(params.storagemap, 1), 1)
 DACBids = repeat(DABidsSingle[:, 2]', size(params.storagemap, 1), 1)
 RTDBids = repeat(RTBidsSingle[:, 1]', size(params.storagemap, 1), 1)
 RTCBids = repeat(RTBidsSingle[:, 2]', size(params.storagemap, 1), 1)
-
-bidmodels = STESTS.loadbidmodels(model_filenames)
-storagebidmodels = STESTS.assign_models_to_storages(
-    params,
-    bidmodels,
-    size(params.storagemap, 1),
-)
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(
@@ -191,3 +190,19 @@ end
 
 println("The UC cost is: ", sum(UCcost))
 println("The ED cost is: ", sum(EDcost))
+
+opt = SendOptions(
+    isSSL = true,
+    username = "3140100275@zju.edu.cn",
+    passwd = "lsl1118!",
+)
+url = "smtps://smtp.zju.edu.cn:994"
+to = ["<nz2343@columbia.edu>"]
+from = "<3140100275@zju.edu.cn>"
+
+subject = "Julia Process Finished"
+message = "Your Julia code has finished running."
+
+body = get_body(to, from, subject, message)
+
+resp = send(url, to, from, body, opt)
