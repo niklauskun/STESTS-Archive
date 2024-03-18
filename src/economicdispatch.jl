@@ -21,7 +21,7 @@ function economicdispatch(
     ntrans = size(params.transmap, 1) # number of transmission lines
     nucgen = size(params.genmap, 1) # number of conventional generators
     ngucs = size(GSMC, 2) # number of generator segments
-    nhydro = size(params.hydromap, 1) # number of hydro generators
+    # nhydro = size(params.hydromap, 1) # number of hydro generators
     # nrenewable = size(params.renewablemap, 1) # number of renewable generators
     nstorage = size(params.storagemap, 1) # number of storage units
 
@@ -50,7 +50,8 @@ function economicdispatch(
     @variable(edmodel, f[1:ntrans, 1:ntimepoints]) # Transmission flow
     @variable(edmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
     @variable(edmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
-    @variable(edmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
+    # @variable(edmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
+    @variable(edmodel, gh[1:nbus, 1:ntimepoints] >= 0) # Hydro output
     # @variable(edmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(edmodel, gs[1:nbus, 1:ntimepoints] >= 0) # Solar output
     @variable(edmodel, gw[1:nbus, 1:ntimepoints] >= 0) # Wind output
@@ -105,7 +106,7 @@ function economicdispatch(
         edmodel,
         LoadBalance[z = 1:nbus, t = 1:ntimepoints],
         sum(params.genmap[:, z] .* guc[:, t]) +
-        sum(params.hydromap[:, z] .* gh[:, t]) +
+        gh[z, t] +
         gs[z, t] +
         gw[z, t] +
         sum(params.storagemap[:, z] .* totald[:, t]) -
@@ -284,11 +285,21 @@ function economicdispatch(
         guc[i, t] >= U[i] * params.GPmin[i]
     )
     # Hydro and renewable capacity limits
+    # @constraint(
+    #     edmodel,
+    #     HCap[i = 1:nhydro, t = 1:Horizon],
+    #     gh[i, t] <= HAvail[i, t]
+    # )
     @constraint(
         edmodel,
-        HCap[i = 1:nhydro, t = 1:Horizon],
-        gh[i, t] <= HAvail[i, t]
+        HCap[z = 1:nbus, t = 1:Horizon],
+        gh[z, t] <= HAvail[z, t]
     )
+    # @constraint(
+    #     edmodel,
+    #     HCap2[z = 1:nbus, t = 1:Horizon],
+    #     gh[z, t] >= params.HPmin[z]
+    # )
     # @constraint(
     #     edmodel,
     #     ReCap[i = 1:nrenewable, t = 1:Horizon],

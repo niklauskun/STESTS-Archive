@@ -29,7 +29,7 @@ function unitcommitmentprice(
     ntrans = size(params.transmap, 1) # number of transmission lines
     nucgen = size(params.genmap, 1) # number of conventional generators
     ngucs = size(GSMC, 2) # number of generator segments
-    nhydro = size(params.hydromap, 1) # number of hydro generators
+    # nhydro = size(params.hydromap, 1) # number of hydro generators
     # nrenewable = size(params.renewablemap, 1) # number of renewable generators
     nstorage = size(params.storagemap, 1) # number of storage units
     U = zeros(Int, size(params.GPIni, 1), Horizon)
@@ -43,7 +43,8 @@ function unitcommitmentprice(
     @variable(ucpmodel, f[1:ntrans, 1:ntimepoints]) # Transmission flow
     @variable(ucpmodel, θ[1:nbus, 1:ntimepoints]) # Phase angle 
     @variable(ucpmodel, guc[1:nucgen, 1:ntimepoints] >= 0) # Generator output
-    @variable(ucpmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
+    # @variable(ucpmodel, gh[1:nhydro, 1:ntimepoints] >= 0) # Hydro output
+    @variable(ucpmodel, gh[1:nbus, 1:ntimepoints] >= 0) # Hydro output
     # @variable(ucpmodel, gr[1:nrenewable, 1:ntimepoints] >= 0) # Renewable output
     @variable(ucpmodel, gs[1:nbus, 1:ntimepoints] >= 0) # Solar output
     @variable(ucpmodel, gw[1:nbus, 1:ntimepoints] >= 0) # Wind output
@@ -80,7 +81,7 @@ function unitcommitmentprice(
         ucpmodel,
         LoadBalance[z = 1:nbus, h = 1:ntimepoints],
         sum(params.genmap[:, z] .* guc[:, h]) +
-        sum(params.hydromap[:, z] .* gh[:, h]) +
+        gh[z, h] +
         gs[z, h] +
         gw[z, h] +
         sum(params.storagemap[:, z] .* d[:, h]) -
@@ -214,11 +215,21 @@ function unitcommitmentprice(
         guc[i, h] >= U[i, h] * params.GPmin[i]
     )
     # Hydro and renewable capacity limits
+    # @constraint(
+    #     ucpmodel,
+    #     HCap[i = 1:nhydro, h = 1:Horizon],
+    #     gh[i, h] <= HAvail[i, h]
+    # )
     @constraint(
         ucpmodel,
-        HCap[i = 1:nhydro, h = 1:Horizon],
-        gh[i, h] <= HAvail[i, h]
+        HCap[z = 1:nbus, h = 1:Horizon],
+        gh[z, h] <= HAvail[z, h]
     )
+    # @constraint(
+    #     ucpmodel,
+    #     HCap2[z = 1:nbus, h = 1:Horizon],
+    #     gh[z, h] >= params.HPmin[z]
+    # )
     # @constraint(
     #     ucpmodel,
     #     ReCap[i = 1:nrenewable, h = 1:Horizon],

@@ -7,7 +7,7 @@ using Interpolations
 RealTimeNoise = true
 # CurrentMix = true
 TransmissionCap = true
-DataName = "./data/ADS2032_7RegionNoise_4hrBES_5GWBES_Strategic.jld2"
+DataName = "./data/ADS2032_5GWBES_BS.jld2"
 folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
 
 @info "Reading data from $folder..."
@@ -63,35 +63,6 @@ timereaddata = @elapsed begin
             size(GINCPmax, 1) ==
             size(genmap, 1) "Generator data length mismatch."
 
-    # read hydro data
-    hydromap = Matrix(
-        CSV.read(joinpath(folder, "HydroMap_C.csv"), DataFrame)[:, 2:end],
-    ) # read hydro map
-    hydrodata = CSV.read(joinpath(folder, "Hydro_C.csv"), DataFrame)
-    HAvail = Matrix(
-        CSV.read(joinpath(folder, "HydroProfile_C.csv"), DataFrame)[:, 2:end],
-    ) # read hydro availability, in MW
-
-    HPmax = hydrodata[!, :"MaxCap(MW)"] # read hydro maximum capacity, in MW    
-    HPmin = hydrodata[!, :"MinCap(MW)"] # read hydro minimum capacity, in MW
-    # HAvail value less than HPmin, set to HPmin, value greater than HPmax, set to HPmax
-    #     for columns in axes(HAvail, 2)
-    #         for rows in axes(HAvail, 1)
-    #             if HAvail[rows, columns] < HPmin[columns]
-    #                 HAvail[rows, columns] = HPmin[columns]
-    #                 @info "Hydro availability less than minimum capacity at row $rows, column $columns."
-    #             elseif HAvail[rows, columns] > HPmax[columns]
-    #                 HAvail[rows, columns] = HPmax[columns]
-    #                 @info "Hydro availability less than minimum capacity at row $rows, column $columns."
-    #             end
-    #         end
-    #     end
-    #     HRamp = vec(XLSX.readdata(filename, "HydroRamp!B3:B29")) # read hydro ramp rate, in MW/hour
-    @assert length(HPmax) ==
-            length(HPmin) ==
-            size(hydromap, 1) ==
-            size(HAvail, 2) "Hydro data length mismatch."
-
     # read renewable data
     # solarmap = Matrix(
     #     CSV.read(joinpath(folder, "SolarMap_C.csv"), DataFrame)[:, 2:end],
@@ -137,6 +108,39 @@ timereaddata = @elapsed begin
     WAvail = Matrix(
         CSV.read(joinpath(folder, "WindZone_C.csv"), DataFrame)[:, 2:end],
     )
+    HAvail = Matrix(
+        CSV.read(joinpath(folder, "HydroZone_C.csv"), DataFrame)[:, 2:end],
+    )
+
+    # read hydro region Pmin data
+    # TODO: Get Region Pmin!
+    # hydromap = Matrix(
+    #     CSV.read(joinpath(folder, "HydroMap_C.csv"), DataFrame)[:, 2:end],
+    # ) # read hydro map
+    hydrodata = CSV.read(joinpath(folder, "HydroZoneCap_C.csv"), DataFrame)
+    # HAvail = Matrix(
+    #     CSV.read(joinpath(folder, "HydroProfile_C.csv"), DataFrame)[:, 2:end],
+    # ) # read hydro availability, in MW
+
+    HPmax = hydrodata[!, :"MaxCap(MW)"] # read hydro maximum capacity, in MW    
+    HPmin = hydrodata[!, :"MinCap(MW)"] # read hydro minimum capacity, in MW
+    # HAvail value less than HPmin, set to HPmin, value greater than HPmax, set to HPmax
+    #     for columns in axes(HAvail, 2)
+    #         for rows in axes(HAvail, 1)
+    #             if HAvail[rows, columns] < HPmin[columns]
+    #                 HAvail[rows, columns] = HPmin[columns]
+    #                 @info "Hydro availability less than minimum capacity at row $rows, column $columns."
+    #             elseif HAvail[rows, columns] > HPmax[columns]
+    #                 HAvail[rows, columns] = HPmax[columns]
+    #                 @info "Hydro availability less than minimum capacity at row $rows, column $columns."
+    #             end
+    #         end
+    #     end
+    #     HRamp = vec(XLSX.readdata(filename, "HydroRamp!B3:B29")) # read hydro ramp rate, in MW/hour
+    @assert length(HPmax) ==
+            length(HPmin) ==
+            # size(hydromap, 1) ==
+            size(HAvail, 2) "Hydro data length mismatch."
 
     # read storage data
     storagemap = Matrix(
@@ -160,7 +164,7 @@ timereaddata = @elapsed begin
 
     @assert size(transmap, 2) ==
             size(genmap, 2) ==
-            size(hydromap, 2) ==
+            # size(hydromap, 2) ==
             size(UCL, 2) "Bus number mismatch."
     @assert size(HAvail, 1) == size(UCL, 1) "Time step mismatch."
 
@@ -190,7 +194,7 @@ timereaddata = @elapsed begin
     GUT = convert(Vector{Int64}, GUT)
     GDT = convert(Vector{Int64}, GDT)
     GPIni = convert(Vector{Float64}, GPIni)
-    hydromap = convert(Matrix{Int64}, hydromap)
+    # hydromap = convert(Matrix{Int64}, hydromap)
     HPmax = convert(Vector{Float64}, HPmax)
     HPmin = convert(Vector{Float64}, HPmin)
     HAvail = convert(Matrix{Float64}, HAvail)
@@ -357,8 +361,8 @@ timereaddata = @elapsed begin
         GDT,
         "GPIni",
         GPIni,
-        "hydromap",
-        hydromap,
+        # "hydromap",
+        # hydromap,
         "HPmax",
         HPmax,
         "HPmin",

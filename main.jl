@@ -1,8 +1,7 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
 # Read data from .jld2 file 
-params =
-    STESTS.read_jld2("./data/ADS2032_7RegionNoise_4hrBES_5GWBES_Strategic.jld2")
+params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS.jld2")
 model_filenames = ["models/BAW0EDH13/4hrmodel1_5Seg.jld2"]
 # model_filenames = [
 #     "models/4hrmodel1_5.jld2",
@@ -21,11 +20,12 @@ strategic = true
 ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
-NDay = 364
+NDay = 2
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-EDHorizon = Int(6) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
+EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
+ESMC = 10.0
 BAWindow = Int(0) # bid-ahead window (number of 5-min intervals, 12-1hr, 48-4hr)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
@@ -54,7 +54,7 @@ output_folder =
     "$ratio" *
     "_BAW" *
     "$BAWindow" *
-    "_MIP0.1_DARTDP"
+    "_MIP0.1_DARTDP_testhydro2"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
@@ -175,6 +175,7 @@ timesolve = @elapsed begin
         output_folder,
         PriceCap,
         ESSeg = ESSeg,
+        ESMC = ESMC,
         UCHorizon = UCHorizon,
         EDHorizon = EDHorizon,
         EDSteps = EDSteps,

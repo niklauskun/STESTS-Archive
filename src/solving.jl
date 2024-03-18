@@ -43,6 +43,7 @@ function solving(
     output_folder::String,
     PriceCap::Array{Float64};
     ESSeg::Int = 1,
+    ESMC::Float64 = 10.0,
     UCHorizon::Int = 24,
     EDHorizon::Int = 1,
     EDSteps::Int = 12,
@@ -144,7 +145,7 @@ function solving(
                     1,
                     EDprice24 * params.storagemap[i, :],
                 )
-                DAdb[i, :] = vda[i, :] / params.Eeta[i] .+ 10.0
+                DAdb[i, :] = vda[i, :] / params.Eeta[i] .+ ESMC
                 DAcb[i, :] = -vda[i, :] .* params.Eeta[i]
             end
         end
@@ -303,13 +304,13 @@ function solving(
                 UCGZone,
                 append = true,
             )
-            UCHydroZone =
-                DataFrame(value.(ucmodel[:gh])' * params.hydromap, :auto)
-            CSV.write(
-                joinpath(output_folder, "UCHydroZone.csv"),
-                UCHydroZone,
-                append = true,
-            )
+            # UCHydroZone =
+            #     DataFrame(value.(ucmodel[:gh])' * params.hydromap, :auto)
+            # CSV.write(
+            #     joinpath(output_folder, "UCHydroZone.csv"),
+            #     UCHydroZone,
+            #     append = true,
+            # )
             # UCRenewableZone =
             #     DataFrame(value.(ucmodel[:gr])' * params.renewablemap, :auto)
             # CSV.write(
@@ -518,7 +519,7 @@ function solving(
                             db[i, :] =
                                 (
                                     vrt[i, :, (h-1)*EDSteps+t] ./
-                                    params.Eeta[i] .+ 10.0
+                                    params.Eeta[i] .+ ESMC
                                 ) / EDSteps
                             cb[i, :] =
                                 -vrt[i, :, (h-1)*EDSteps+t] .* params.Eeta[i] /
@@ -526,7 +527,7 @@ function solving(
                             # db[i, :] .=
                             #     (
                             #         params.storagemap[i, :]' * UCprice[:, h] /
-                            #         0.9 + 10
+                            #         0.9 + ESMC
                             #     ) / EDSteps
                             # cb[i, :] .=
                             #     -params.storagemap[i, :]' *
@@ -574,7 +575,7 @@ function solving(
                                     db[i, :] =
                                         (
                                             vrt[i, :, (h-1)*EDSteps+t] ./
-                                            params.Eeta[i] .+ 10.0
+                                            params.Eeta[i] .+ ESMC
                                         ) / EDSteps
                                     cb[i, :] =
                                         -vrt[i, :, (h-1)*EDSteps+t] .*
@@ -582,7 +583,7 @@ function solving(
                                     # db[i, :] .=
                                     #     (
                                     #         params.storagemap[i, :]' *
-                                    #         UCprice[:, h] / 0.9 + 10
+                                    #         UCprice[:, h] / 0.9 + ESMC
                                     #     ) / EDSteps
                                     # cb[i, :] .=
                                     #     -params.storagemap[i, :]' *
@@ -605,7 +606,7 @@ function solving(
                                     ]
                                     enforce_strictly_decreasing_vector(vavg)
                                     cb[i, :] .= -vavg .* 0.9 ./ EDSteps
-                                    db[i, :] .= (vavg ./ 0.9 .+ 10) ./ EDSteps
+                                    db[i, :] .= (vavg ./ 0.9 .+ ESMC) ./ EDSteps
                                 end
                                 for s in 1:ESSeg
                                     set_objective_coefficient(
@@ -754,13 +755,13 @@ function solving(
                         #     EDReGendf,
                         #     append = true,
                         # )
-                        EDHydroGen = value.(edmodel[:gh])[:, 1]
-                        EDHydroGendf = DataFrame(EDHydroGen', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDHydro.csv"),
-                            EDHydroGendf,
-                            append = true,
-                        )
+                        # EDHydroGen = value.(edmodel[:gh])[:, 1]
+                        # EDHydroGendf = DataFrame(EDHydroGen', :auto)
+                        # CSV.write(
+                        #     joinpath(output_folder, "EDHydro.csv"),
+                        #     EDHydroGendf,
+                        #     append = true,
+                        # )
                         # CSV.write(
                         #     joinpath(output_folder, "EDDbid.csv"),
                         #     DataFrame(EDDBidInput[:, 1]', :auto),
@@ -834,10 +835,17 @@ function solving(
                             EDGZone,
                             append = true,
                         )
-                        EDHydroZone = DataFrame(
-                            value.(edmodel[:gh])[:, 1]' * params.hydromap,
-                            :auto,
-                        )
+                        # EDHydroZone = DataFrame(
+                        #     value.(edmodel[:gh])[:, 1]' * params.hydromap,
+                        #     :auto,
+                        # )
+                        # CSV.write(
+                        #     joinpath(output_folder, "EDHydroZone.csv"),
+                        #     EDHydroZone,
+                        #     append = true,
+                        # )
+                        EDHydroZone =
+                            DataFrame(value.(edmodel[:gh])[:, 1]', :auto)
                         CSV.write(
                             joinpath(output_folder, "EDHydroZone.csv"),
                             EDHydroZone,

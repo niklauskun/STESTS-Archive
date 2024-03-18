@@ -20,7 +20,8 @@ mutable struct ModelParams
     GUT::Vector{Int64}
     GDT::Vector{Int64}
     GPIni::Vector{Float64}
-    hydromap::Matrix{Int64}
+    # hydromap::Matrix{Int64}
+    HPmin::Vector{Float64}
     HAvail::Matrix{Float64}
     # renewablemap::Matrix{Int64}
     # RAvail::Matrix{Float64}
@@ -72,7 +73,8 @@ function read_jld2(filename::String)
     GUT = data["GUT"]
     GDT = data["GDT"]
     GPIni = data["GPIni"]
-    hydromap = data["hydromap"]
+    # hydromap = data["hydromap"]
+    HPmin = data["HPmin"]
     HAvail = data["HAvail"]
     # renewablemap = data["renewablemap"]
     # RAvail = data["RAvail"]
@@ -109,7 +111,8 @@ function read_jld2(filename::String)
         GUT,
         GDT,
         GPIni,
-        hydromap,
+        # hydromap,
+        HPmin,
         HAvail,
         # renewablemap,
         # RAvail,
