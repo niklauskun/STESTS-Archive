@@ -3,7 +3,6 @@ output/
 data/ADS2032.jld2
 data/WECC240.jld2
 data/ADS2032_Noise.jld2
-*.jld2
 data/WECC240.jld2
 2032 ADS PCM V2.4.1 Public Data/.ipynb_checkpoints/ADS_Preprocessing_CurrentMiX-checkpoint.ipynb
 2032 ADS PCM V2.4.1 Public Data/.ipynb_checkpoints/K-means RTD noise-checkpoint.ipynb
