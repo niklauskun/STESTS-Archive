@@ -190,19 +190,3 @@ end
 
 println("The UC cost is: ", sum(UCcost))
 println("The ED cost is: ", sum(EDcost))
-
-opt = SendOptions(
-    isSSL = true,
-    username = "3140100275@zju.edu.cn",
-    passwd = "lsl1118!",
-)
-url = "smtps://smtp.zju.edu.cn:994"
-to = ["<nz2343@columbia.edu>"]
-from = "<3140100275@zju.edu.cn>"
-
-subject = "Julia Process Finished"
-message = "Your Julia code has finished running."
-
-body = get_body(to, from, subject, message)
-
-resp = send(url, to, from, body, opt)
