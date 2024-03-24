@@ -12,7 +12,7 @@ UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours f
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
-ESMC = 30.0
+ESMC = 20.0
 BAWindow = Int(0) # bid-ahead window (number of 5-min intervals, 12-1hr, 48-4hr)
 PriceCap = repeat(
     repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
@@ -36,8 +36,7 @@ output_folder =
     "_BAW" *
     "$BAWindow" *
     "_MC" *
-    "$ESMC" *
-    "testmodelassign2"
+    "$ESMC"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
@@ -70,9 +69,8 @@ if strategic == true
                 )
             end
         end
-        if ratio == 0.0
-            println("No AI-Powered BES.")
-        end
+    elseif ratio == 0.0
+        println("No AI-Powered BES.")
     else
         STESTS.update_battery_storage!(params, ratio, output_folder)
     end
