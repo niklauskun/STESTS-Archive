@@ -99,12 +99,25 @@ end
 #     return storage_to_model_map
 # end
 
-function assign_models_to_storages(params, models, num_storages, output_folder)
+function assign_models_to_storages(
+    params,
+    models,
+    num_storages,
+    output_folder;
+    RandomModel = false,
+    RandomSeed = 0,
+)
     storage_to_model_map = []
     storage_to_index_map = []
 
     # Initialize a dictionary to keep track of the last model index used for each region
     last_model_index_used = Dict{String,Int}()
+    unused_model_indices = Dict{String,Vector{Int}}()
+
+    # Set the random seed if RandomModel is true
+    if RandomModel
+        Random.seed!(RandomSeed)
+    end
 
     for storage_id in 1:num_storages
         if params.EStrategic[storage_id] == 1
@@ -112,16 +125,43 @@ function assign_models_to_storages(params, models, num_storages, output_folder)
                 findfirst(x -> x == 1, params.storagemap[storage_id, 1:6])
             if region_idx !== nothing
                 region_key = "Region$(region_idx)"
-                # Initialize or increment the model index for this region
-                last_model_index_used[region_key] =
-                    get(last_model_index_used, region_key, 0) + 1
-
                 model_keys = collect(keys(models[region_key]))
                 num_models = length(model_keys)
-                # Ensure the model index loops back to the start if it exceeds the number of models available
-                selected_model_index =
-                    (last_model_index_used[region_key] - 1) % num_models + 1
+                if RandomModel
+                    # Initialize or replenish the unused_model_indices for the region
+                    if !haskey(unused_model_indices, region_key) ||
+                       isempty(unused_model_indices[region_key])
+                        unused_model_indices[region_key] = collect(1:num_models)
+                    end
+
+                    # Randomly select a model index from the unused indices, then remove it from the list
+                    random_index =
+                        rand(1:length(unused_model_indices[region_key]))
+                    selected_model_index =
+                        unused_model_indices[region_key][random_index]
+                    deleteat!(unused_model_indices[region_key], random_index)
+                else
+                    # Sequential model selection logic
+                    last_model_index_used[region_key] =
+                        get(last_model_index_used, region_key, 0) + 1
+                    selected_model_index =
+                        (last_model_index_used[region_key] - 1) % num_models + 1
+                end
+
                 selected_model_key = model_keys[selected_model_index]
+                # if RandomModel
+                #     # Shuffle the model_keys if RandomModel is true
+                #     shuffled_model_keys = shuffle(model_keys)
+                #     selected_model_key = shuffled_model_keys[1] # Select the first model from the shuffled array
+                # else
+                #     # Initialize or increment the model index for this region
+                #     last_model_index_used[region_key] =
+                #         get(last_model_index_used, region_key, 0) + 1
+                #     # Ensure the model index loops back to the start if it exceeds the number of models available
+                #     selected_model_index =
+                #         (last_model_index_used[region_key] - 1) % num_models + 1
+                #     selected_model_key = model_keys[selected_model_index]
+                # end
 
                 push!(
                     storage_to_model_map,

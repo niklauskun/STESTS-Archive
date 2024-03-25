@@ -4,7 +4,9 @@ using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS.jld2")
 
 strategic = true
-ratio = 0.9
+RandomModel = false
+RandomSeed = 2
+ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
 NDay = 364
@@ -36,7 +38,9 @@ output_folder =
     "_BAW" *
     "$BAWindow" *
     "_MC" *
-    "$ESMC"
+    "$ESMC" *
+    "_" *
+    "$RandomSeed"
 mkpath(output_folder)
 mkpath(output_folder * "/Strategic")
 mkpath(output_folder * "/NStrategic")
@@ -81,6 +85,8 @@ if strategic == true
         bidmodels,
         size(params.storagemap, 1),
         output_folder,
+        RandomModel = RandomModel,
+        RandomSeed = RandomSeed,
     )
 end
 
