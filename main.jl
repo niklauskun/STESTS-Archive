@@ -5,7 +5,7 @@ params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS.jld2")
 
 strategic = true
 RandomModel = false
-RandomSeed = 2
+RandomSeed = 1
 ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
@@ -42,8 +42,6 @@ output_folder =
     "_" *
     "$RandomSeed"
 mkpath(output_folder)
-mkpath(output_folder * "/Strategic")
-mkpath(output_folder * "/NStrategic")
 
 model_filenames = [
     "models/BAW" *
@@ -58,7 +56,10 @@ model_base_folder =
     "models/BAW" * "$BAWindow" * "EDH" * "$EDHorizon" * "MC" * "$ESMC"
 
 # Update strategic storage scale base on set ratio
-if strategic == true
+storagebidmodels = []
+if strategic
+    mkpath(output_folder * "/Strategic")
+    mkpath(output_folder * "/NStrategic")
     if ratio == 1.0
         for i in eachindex(params.Eeta)
             if params.Eeta[i] == 0.8
@@ -174,9 +175,9 @@ timesolve = @elapsed begin
         ucmodel,
         ucpmodel,
         edmodel,
-        storagebidmodels,
         output_folder,
         PriceCap,
+        bidmodels = storagebidmodels,
         ESSeg = ESSeg,
         ESMC = ESMC,
         UCHorizon = UCHorizon,
