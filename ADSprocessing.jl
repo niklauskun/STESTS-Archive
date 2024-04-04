@@ -5,10 +5,11 @@ using Interpolations
 # read CSV files
 
 RealTimeNoise = true
+Year = 2022
 # CurrentMix = true
 TransmissionCap = true
-DataName = "./data/ADS2032_5GWBES_BS.jld2"
-folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/"
+DataName = "./data/ADS2032_5GWBES_BS_" * "$Year" * ".jld2"
+folder = "2032 ADS PCM V2.4.1 Public Data/Processed Data/" * "$Year"
 
 @info "Reading data from $folder..."
 timereaddata = @elapsed begin
@@ -150,6 +151,10 @@ timereaddata = @elapsed begin
         joinpath(folder, "Storage_C_4hr_5GW_Strategic.csv"),
         DataFrame,
     )
+    ESDABids =
+        Matrix(CSV.read(joinpath(folder, "StorageDABids.csv"), DataFrame))
+    ESRTBids =
+        Matrix(CSV.read(joinpath(folder, "StorageRTBids.csv"), DataFrame))
 
     EPC = -storagedata[!, :"MinCap(MW)"] # read storage charge capacity, in MW
     EPD = storagedata[!, :"MaxCap(MW)"] # read storage discharge capacity, in MW
@@ -397,6 +402,10 @@ timereaddata = @elapsed begin
         ESOCini,
         "EStrategic",
         EStrategic,
+        "ESDABids",
+        ESDABids,
+        "ESRTBids",
+        ESRTBids,
         "UCL",
         UCL,
         "EDL",

@@ -1,7 +1,7 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
 # Read data from .jld2 file 
-params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS.jld2")
+params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS_2022.jld2")
 
 strategic = true
 RandomModel = false
@@ -9,7 +9,7 @@ RandomSeed = 1
 ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
-NDay = 364
+NDay = 7
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
@@ -17,7 +17,10 @@ ESSeg = Int(1)
 ESMC = 20.0
 BAWindow = Int(0) # bid-ahead window (number of 5-min intervals, 12-1hr, 48-4hr)
 PriceCap = repeat(
-    repeat((range(220, stop = 1000, length = 40))', outer = (7, 1)),
+    repeat(
+        (range(220, stop = 1000, length = 40))',
+        outer = (size(params.UCL, 2), 1),
+    ),
     outer = (1, 1, EDHorizon),
 )
 FuelAdjustment = 1.2
@@ -25,7 +28,7 @@ ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
 
 output_folder =
-    "output/Strategic/UC" *
+    "output/Strategic/2022/UC" *
     "$UCHorizon" *
     "ED" *
     "$EDHorizon" *
@@ -91,22 +94,10 @@ if strategic
     )
 end
 
-DABidsSingle = Matrix(
-    CSV.read(
-        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageDABids.csv",
-        DataFrame,
-    ),
-)
-RTBidsSingle = Matrix(
-    CSV.read(
-        "2032 ADS PCM V2.4.1 Public Data/Processed Data/StorageRTBids.csv",
-        DataFrame,
-    ),
-)
-DADBids = repeat(DABidsSingle[:, 1]', size(params.storagemap, 1), 1)
-DACBids = repeat(DABidsSingle[:, 2]', size(params.storagemap, 1), 1)
-RTDBids = repeat(RTBidsSingle[:, 1]', size(params.storagemap, 1), 1)
-RTCBids = repeat(RTBidsSingle[:, 2]', size(params.storagemap, 1), 1)
+DADBids = repeat(params.ESDABids[:, 1]', size(params.storagemap, 1), 1)
+DACBids = repeat(params.ESDABids[:, 2]', size(params.storagemap, 1), 1)
+RTDBids = repeat(params.ESRTBids[:, 1]', size(params.storagemap, 1), 1)
+RTCBids = repeat(params.ESRTBids[:, 2]', size(params.storagemap, 1), 1)
 
 # Formulate unit commitment model
 ucmodel = STESTS.unitcommitment(

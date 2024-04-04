@@ -34,6 +34,8 @@ mutable struct ModelParams
     ESOC::Vector{Float64}
     ESOCini::Vector{Float64}
     EStrategic::Vector{Int64}
+    ESDABids::Matrix{Float64}
+    ESRTBids::Matrix{Float64}
     EDL::Matrix{Float64}
     EDHAvail::Matrix{Float64}
     # EDRAvail::Matrix{Float64}
@@ -87,6 +89,8 @@ function read_jld2(filename::String)
     ESOC = data["ESOC"]
     ESOCini = data["ESOCini"]
     EStrategic = data["EStrategic"]
+    ESDABids = data["ESDABids"]
+    ESRTBids = data["ESRTBids"]
     EDL = data["EDL"]
     EDHAvail = data["EDHAvail"]
     # EDRAvail = data["EDRAvail"]
@@ -125,6 +129,8 @@ function read_jld2(filename::String)
         ESOC,
         ESOCini,
         EStrategic,
+        ESDABids,
+        ESRTBids,
         EDL,
         EDHAvail,
         # EDRAvail,

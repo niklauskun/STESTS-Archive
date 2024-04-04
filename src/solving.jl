@@ -32,10 +32,10 @@ function solving(
     params::STESTS.ModelParams,
     Nday::Int,
     strategic::Bool,
-    DADBids::Matrix{Int64},
-    DACBids::Matrix{Int64},
-    RTDBids::Matrix{Int64},
-    RTCBids::Matrix{Int64},
+    DADBids::Matrix{Float64},
+    DACBids::Matrix{Float64},
+    RTDBids::Matrix{Float64},
+    RTCBids::Matrix{Float64},
     ucmodel::JuMP.Model,
     ucpmodel::JuMP.Model,
     edmodel::JuMP.Model,
@@ -133,7 +133,7 @@ function solving(
         else
             # generate OCB DA bids (non-AI for all ES)
             EDprice288 = all_EDprices_df[(end-287):end, :] .* EDSteps
-            for col in 1:7
+            for col in 1:size(params.UCL, 2)
                 EDprice24[:, col] =
                     mean(reshape(EDprice288[!, col], 12, :), dims = 1)
             end
