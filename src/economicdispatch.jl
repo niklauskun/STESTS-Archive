@@ -222,7 +222,7 @@ function economicdispatch(
     @constraint(
         edmodel,
         StorageSOC[i = 1:nstorage, s = 1:ESSeg, t = 2:ntimepoints],
-        e[i, s, 1] ==
+        e[i, s, t] ==
         e[i, s, t-1] + c[i, s, 1] * params.Eeta[i] / Steps -
         d[i, s, 1] / params.Eeta[i] / Steps
     )
