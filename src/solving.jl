@@ -346,8 +346,8 @@ function solving(
 
             for i in axes(params.GPIni, 1)
                 set_normalized_rhs(ucmodel[:ST0][i], U[i, 24])
-                set_normalized_rhs(ucmodel[:UTimeIni][i], SU[i])
-                set_normalized_rhs(ucmodel[:DTimeIni][i], SD[i])
+                set_normalized_rhs(ucmodel[:UTimeIni][i], min(SU[i], UCHorizon))
+                set_normalized_rhs(ucmodel[:DTimeIni][i], min(SD[i], UCHorizon))
                 for h in 1:UCHorizon
                     set_normalized_coefficient(
                         ucmodel[:UTimeIni][i],

@@ -1,8 +1,8 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
+Year = 2022
 # Read data from .jld2 file 
-params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS.jld2")
-
+params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS_" * "$Year" * ".jld2")
 strategic = true
 RandomModel = false
 RandomSeed = 1
@@ -11,7 +11,7 @@ RM = 0.03
 VOLL = 9000.0
 NDay = 364
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
-EDHorizon = Int(6) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
+EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
 ESSeg = Int(1)
 ESMC = 20.0
@@ -28,7 +28,9 @@ ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
 
 output_folder =
-    "output/Strategic/UC" *
+    "output/Strategic/" *
+    "$Year" *
+    "/UC" *
     "$UCHorizon" *
     "ED" *
     "$EDHorizon" *
@@ -46,15 +48,15 @@ output_folder =
     "$RandomSeed"
 mkpath(output_folder)
 
-model_filenames = [
-    "models/BAW" *
-    "$BAWindow" *
-    "EDH" *
-    "$EDHorizon" *
-    "MC" *
-    "$ESMC" *
-    "/Region1/4hrmodel1_5Seg.jld2",
-]
+# model_filenames = [
+#     "models/BAW" *
+#     "$BAWindow" *
+#     "EDH" *
+#     "$EDHorizon" *
+#     "MC" *
+#     "$ESMC" *
+#     "/Region1/4hrmodel1_5Seg.jld2",
+# ]
 model_base_folder =
     "models/BAW" * "$BAWindow" * "EDH" * "$EDHorizon" * "MC" * "$ESMC"
 
