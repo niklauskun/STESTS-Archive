@@ -27,6 +27,609 @@ function enforce_strictly_decreasing_vector(v, delta = 1e-5)
     end
 end
 
+function solvingError(model::JuMP.Model, type::String, d = 0, h = 0, t = 0)
+    println("Model is infeasible. Starting IIS analysis...")
+    compute_conflict!(model)
+    iis_model, _ = copy_conflict(model)
+    output_file = "diagnose_output_" * type * ".txt"
+    open(output_file, "w") do f
+        return write(f, string(iis_model))
+    end
+    print(iis_model)
+    if type == "ED"
+        error("No optimal solution found for ED at hour $h step $t.")
+    elseif type == "UC"
+        error("No optimal solution found for UC on day $d.")
+    end
+end
+
+function setUCConstraints(
+    ucmodel::JuMP.Model,
+    ucpmodel::JuMP.Model,
+    LInput::Matrix{Float64},
+    HAvailInput::Matrix{Float64},
+    WAvailInput::Matrix{Float64},
+    SAvailInput::Matrix{Float64},
+    DADBids::Matrix{Float64},
+    DAdb::Matrix{Float64},
+    DAcb::Matrix{Float64},
+    UCHorizon::Int = 24,
+    RM::Float64 = 0.03,
+)
+    for h in 1:UCHorizon
+        for z in axes(LInput, 1)
+            set_normalized_rhs(ucmodel[:LoadBalance][z, h], LInput[z, h])
+            set_normalized_rhs(
+                ucmodel[:Reserve][h],
+                RM * sum(LInput, dims = 1)[h],
+            )
+            set_normalized_rhs(ucpmodel[:LoadBalance][z, h], LInput[z, h])
+            set_normalized_rhs(
+                ucpmodel[:Reserve][h],
+                RM * sum(LInput, dims = 1)[h],
+            )
+        end
+        for i in axes(HAvailInput, 1)
+            set_normalized_rhs(ucmodel[:HCap][i, h], HAvailInput[i, h])
+            set_normalized_rhs(ucpmodel[:HCap][i, h], HAvailInput[i, h])
+        end
+        # for i in axes(RAvailInput, 1)
+        #     set_normalized_rhs(ucmodel[:ReCap][i, h], RAvailInput[i, h])
+        #     set_normalized_rhs(ucpmodel[:ReCap][i, h], RAvailInput[i, h])
+        # end
+        for z in axes(SAvailInput, 1)
+            set_normalized_rhs(ucmodel[:SCap][z, h], SAvailInput[z, h])
+            set_normalized_rhs(ucpmodel[:SCap][z, h], SAvailInput[z, h])
+        end
+        for z in axes(WAvailInput, 1)
+            set_normalized_rhs(ucmodel[:WCap][z, h], WAvailInput[z, h])
+            set_normalized_rhs(ucpmodel[:WCap][z, h], WAvailInput[z, h])
+        end
+        for i in axes(DADBids, 1)
+            set_objective_coefficient(ucmodel, ucmodel[:d][i, h], DAdb[i, h])
+            set_objective_coefficient(ucmodel, ucmodel[:c][i, h], DAcb[i, h])
+            set_objective_coefficient(ucpmodel, ucpmodel[:d][i, h], DAdb[i, h])
+            set_objective_coefficient(ucpmodel, ucpmodel[:c][i, h], DAcb[i, h])
+        end
+    end
+end
+
+function writeUCtoCSV(
+    params,
+    output_folder::String,
+    ucmodel,
+    Udf,
+    Vdf,
+    Wdf,
+    Sdf,
+)
+    CSV.write(joinpath(output_folder, "UCCommit.csv"), Udf, append = true)
+    CSV.write(joinpath(output_folder, "UCStart.csv"), Vdf, append = true)
+    CSV.write(joinpath(output_folder, "UCShut.csv"), Wdf, append = true)
+    CSV.write(joinpath(output_folder, "UCSlack.csv"), Sdf, append = true)
+    UCGdf = DataFrame(value.(ucmodel[:guc])', :auto)
+    CSV.write(joinpath(output_folder, "UCGen.csv"), UCGdf, append = true)
+    # UCRedf = DataFrame(value.(ucmodel[:gr])', :auto)
+    # CSV.write(
+    #     joinpath(output_folder, "UCRenewable.csv"),
+    #     UCRedf,
+    #     append = true,
+    # )
+    UCSolardf = DataFrame(value.(ucmodel[:gs])', :auto)
+    CSV.write(joinpath(output_folder, "UCSolar.csv"), UCSolardf, append = true)
+    UCWinddf = DataFrame(value.(ucmodel[:gw])', :auto)
+    CSV.write(joinpath(output_folder, "UCWind.csv"), UCWinddf, append = true)
+    UCHdf = DataFrame(value.(ucmodel[:gh])', :auto)
+    CSV.write(joinpath(output_folder, "UCHydro.csv"), UCHdf, append = true)
+    UCGZone = DataFrame(value.(ucmodel[:guc])' * params.genmap, :auto)
+    CSV.write(joinpath(output_folder, "UCGenZone.csv"), UCGZone, append = true)
+    # UCHydroZone =
+    #     DataFrame(value.(ucmodel[:gh])' * params.hydromap, :auto)
+    # CSV.write(
+    #     joinpath(output_folder, "UCHydroZone.csv"),
+    #     UCHydroZone,
+    #     append = true,
+    # )
+    # UCRenewableZone =
+    #     DataFrame(value.(ucmodel[:gr])' * params.renewablemap, :auto)
+    # CSV.write(
+    #     joinpath(output_folder, "UCRenewableZone.csv"),
+    #     UCRenewableZone,
+    #     append = true,
+    # )
+    UCSoCZone = DataFrame(value.(ucmodel[:e])' * params.storagemap, :auto)
+    CSV.write(
+        joinpath(output_folder, "UCSoCZone.csv"),
+        UCSoCZone,
+        append = true,
+    )
+    UCFdf = DataFrame(value.(ucmodel[:f])', :auto)
+    return CSV.write(
+        joinpath(output_folder, "UCTrans.csv"),
+        UCFdf,
+        append = true,
+    )
+end
+
+function calculateDAP(params, ucpmodel, UCHorizon, U, V, W, GPIniInput)
+    # Calculate day-ahead price
+    for i in axes(params.GPIni, 1)
+        for h in 1:UCHorizon
+            set_normalized_rhs(
+                ucpmodel[:UnitReserve1][i, h],
+                params.GPmax[i] * U[i, h],
+            )
+            set_normalized_rhs(
+                ucpmodel[:UCGenSeg1][i, h],
+                params.GPmin[i] * U[i, h],
+            )
+            set_normalized_rhs(
+                ucpmodel[:UCCapU][i, h],
+                params.GPmax[i] * U[i, h],
+            )
+            set_normalized_rhs(
+                ucpmodel[:UCCapL][i, h],
+                params.GPmin[i] * U[i, h],
+            )
+        end
+        for h in 1:(UCHorizon-1)
+            set_normalized_rhs(
+                ucpmodel[:RU][i, h],
+                params.GRU[i] + params.GPmin[i] * V[i, h+1],
+            )
+            set_normalized_rhs(
+                ucpmodel[:RD][i, h],
+                params.GRD[i] + params.GPmin[i] * W[i, h+1],
+            )
+        end
+        set_normalized_rhs(
+            ucpmodel[:RUIni][i],
+            params.GRU[i] + params.GPmin[i] * V[i, 1] + GPIniInput[i],
+        )
+        set_normalized_rhs(
+            ucpmodel[:RDIni][i],
+            params.GRD[i] + params.GPmin[i] * W[i, 1] - GPIniInput[i],
+        )
+    end
+end
+
+function setEDConstraints(
+    params,
+    output_folder,
+    edmodel,
+    EDV,
+    EDW,
+    EDU,
+    U,
+    EDGPIni,
+    EDSteps,
+    BAWindow,
+    strategic,
+    bidmodels,
+    db,
+    cb,
+    vrt,
+    segment_length,
+    ESSeg,
+    RTDBids,
+    RTCBids,
+    AdjustedEDL,
+    AdjustedEDSolar,
+    AdjustedEDWind,
+    all_UCprices_df,
+    all_EDprices_df,
+    EDHorizon,
+    d,
+    h,
+    t,
+    ts,
+)
+    # Initialize ED matrices
+    EDLInput = convert(Matrix{Float64}, AdjustedEDL[ts:ts+EDHorizon-1, :]')
+    EDHAvailInput =
+        convert(Matrix{Float64}, params.EDHAvail[ts:ts+EDHorizon-1, :]')
+    # EDRAvailInput = convert(
+    #     Matrix{Float64},
+    #     params.EDRAvail[ts:ts+EDHorizon-1, :]',
+    # )
+    EDSAvailInput =
+        convert(Matrix{Float64}, AdjustedEDSolar[ts:ts+EDHorizon-1, :]')
+    EDWAvailInput =
+        convert(Matrix{Float64}, AdjustedEDWind[ts:ts+EDHorizon-1, :]')
+    EDDBidInput = convert(Matrix{Float64}, RTDBids[:, ts:ts+EDHorizon-1])
+    EDCBidInput = convert(Matrix{Float64}, RTCBids[:, ts:ts+EDHorizon-1])
+
+    # Save DAP and RTP for the next day if not the first day
+    if d > 1
+        last_24_UC = all_UCprices_df[(end-48+h):(end-25+h), :]
+        last_36_ED =
+            all_EDprices_df[(end-35-BAWindow):end-BAWindow, :] .* EDSteps
+        predictors = vcat(last_24_UC, last_36_ED)
+    end
+
+    for tp in 1:EDHorizon
+        # Ad hoc method to solve initial generation output for ED model
+        if ts == 1 && tp == 1
+            for i in axes(params.GPIni, 1)
+                set_normalized_rhs(
+                    edmodel[:RUIni][i],
+                    params.GPIni[i] +
+                    params.GRU[i] +
+                    (params.GPmin[i]) * EDV[i, (h-1)*EDSteps+t+tp-1],
+                )
+                set_normalized_rhs(
+                    edmodel[:RDIni][i],
+                    -params.GPIni[i] +
+                    params.GRD[i] +
+                    (params.GPmin[i]) * EDW[i, (h-1)*EDSteps+t+tp-1],
+                )
+                # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
+                # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
+            end
+        elseif h == 1 && t == 1 && tp == 1
+            for i in axes(params.GPIni, 1)
+                set_normalized_rhs(
+                    edmodel[:RUIni][i],
+                    EDGPIni[i] +
+                    params.GRU[i] / EDSteps +
+                    (params.GPmin[i]) * EDV[i, 1],
+                )
+                set_normalized_rhs(
+                    edmodel[:RDIni][i],
+                    -EDGPIni[i] +
+                    params.GRD[i] / EDSteps +
+                    (params.GPmax[i]) * EDW[i, 1],
+                )
+                # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
+                # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
+            end
+        end
+        # update energy storage bids
+        if strategic
+            # update bids for AI-Enchanced and Baseline energy storage
+            # update bids for baseline energy storage using OCB
+            for i in axes(RTDBids, 1)
+                if params.EStragetic[i] == 0
+                    db[i, :] =
+                        (vrt[i, :, (h-1)*EDSteps+t] ./ params.Eeta[i] .+ ESMC) /
+                        EDSteps
+                    cb[i, :] =
+                        -vrt[i, :, (h-1)*EDSteps+t] .* params.Eeta[i] / EDSteps
+                    if tp == 1
+                        cbdf = DataFrame(12 * cb[i, :]', :auto)
+                        dbdf = DataFrame(12 * db[i, :]', :auto)
+                        CSV.write(
+                            joinpath(
+                                output_folder * "/NStrategic",
+                                "EDESCB" * "$i" * ".csv",
+                            ),
+                            cbdf,
+                            append = true,
+                        )
+                        CSV.write(
+                            joinpath(
+                                output_folder * "/NStrategic",
+                                "EDESDB" * "$i" * ".csv",
+                            ),
+                            dbdf,
+                            append = true,
+                        )
+                    end
+                end
+            end
+            # update bids for AI-Enhaned energy storage using OCB + AI
+            for (i, model) in bidmodels
+                if d == 1
+                    db[i, :] =
+                        (vrt[i, :, (h-1)*EDSteps+t] ./ params.Eeta[i] .+ ESMC) /
+                        EDSteps
+                    cb[i, :] =
+                        -vrt[i, :, (h-1)*EDSteps+t] .* params.Eeta[i] / EDSteps
+                else
+                    v = model(
+                        predictors[
+                            :,
+                            findfirst(isequal(1), params.storagemap[i, :]),
+                        ],
+                    )
+                    vavg = [
+                        mean(v[(i-1)*segment_length+1:i*segment_length]) for
+                        i in 1:ESSeg
+                    ]
+                    enforce_strictly_decreasing_vector(vavg)
+                    cb[i, :] .= -vavg .* 0.9 ./ EDSteps
+                    db[i, :] .= (vavg ./ 0.9 .+ ESMC) ./ EDSteps
+                end
+                if tp == 1
+                    cbdf = DataFrame(12 * cb[i, :]', :auto)
+                    dbdf = DataFrame(12 * db[i, :]', :auto)
+                    CSV.write(
+                        joinpath(
+                            output_folder * "/Strategic",
+                            "EDESCB" * "$i" * ".csv",
+                        ),
+                        cbdf,
+                        append = true,
+                    )
+                    CSV.write(
+                        joinpath(
+                            output_folder * "/Strategic",
+                            "EDESDB" * "$i" * ".csv",
+                        ),
+                        dbdf,
+                        append = true,
+                    )
+                end
+            end
+        else
+            # update bids for all energy storage using historical bids
+            for i in axes(RTDBids, 1)
+                db[i, :] .= EDDBidInput[i, tp] / EDSteps
+                cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
+            end
+        end
+        # Update new bids in edmodel
+        for i in axes(RTDBids, 1)
+            for s in 1:ESSeg
+                set_objective_coefficient(
+                    edmodel,
+                    edmodel[:d][i, s, tp],
+                    db[i, s],
+                )
+                set_objective_coefficient(
+                    edmodel,
+                    edmodel[:c][i, s, tp],
+                    cb[i, s],
+                )
+            end
+        end
+
+        for z in axes(EDLInput, 1)
+            set_normalized_rhs(edmodel[:LoadBalance][z, tp], EDLInput[z, tp])
+        end
+        for i in axes(U, 1)
+            set_normalized_rhs(
+                edmodel[:UCCapU][i, tp],
+                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmax[i],
+            )
+            set_normalized_rhs(
+                edmodel[:UCCapL][i, tp],
+                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmin[i],
+            )
+            set_normalized_rhs(
+                edmodel[:UCGenSeg1][i, tp],
+                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmin[i],
+            )
+        end
+        for i in axes(EDHAvailInput, 1)
+            set_normalized_rhs(edmodel[:HCap][i, tp], EDHAvailInput[i, tp])
+        end
+        # for i in axes(EDRAvailInput, 1)
+        #     set_normalized_rhs(
+        #         edmodel[:ReCap][i, tp],
+        #         EDRAvailInput[i, tp],
+        #     )
+        # end
+        for z in axes(EDSAvailInput, 1)
+            set_normalized_rhs(edmodel[:SCap][z, tp], EDSAvailInput[z, tp])
+        end
+        for z in axes(EDWAvailInput, 1)
+            set_normalized_rhs(edmodel[:WCap][z, tp], EDWAvailInput[z, tp])
+        end
+        if EDHorizon > 1 && tp > 1
+            for i in axes(params.GPIni, 1)
+                set_normalized_rhs(
+                    edmodel[:RU][i, tp],
+                    params.GRU[i] / EDSteps +
+                    params.GPmin[i] * EDV[i, (h-1)*EDSteps+t+tp-1],
+                )
+            end
+            for i in axes(params.GPIni, 1)
+                set_normalized_rhs(
+                    edmodel[:RD][i, tp],
+                    params.GRD[i] / EDSteps +
+                    params.GPmax[i] * EDW[i, (h-1)*EDSteps+t+tp-1],
+                )
+            end
+        end
+    end
+end
+
+function writeEDtoCSVandUpdateSOC(
+    params,
+    output_folder::String,
+    edmodel,
+    EDDBidInput,
+    EDCBidInput,
+    EDU,
+    EDV,
+    EDW,
+    db,
+    cb,
+    all_EDprices_df,
+    storagezone,
+    PriceCap,
+    FuelAdjustment,
+    EDGSMC,
+    EDGMCcost,
+    EDGSMCcost,
+    EDVOLL,
+    EDEScost,
+    EDcost,
+    EDSteps,
+    ESSeg,
+    d,
+    h,
+    t,
+)
+    ts = ((d - 1) * 24 + h - 1) * EDSteps + t # time step
+    EDGMCcost[ts] =
+        sum(value.(edmodel[:guc])[:, 1] .* params.GMC * FuelAdjustment) /
+        EDSteps
+    EDGSMCcost[ts] =
+        sum(
+            value.(edmodel[:gucs])[:, :, 1] .* EDGSMC[:, :, 1] * FuelAdjustment,
+        ) / EDSteps
+    EDVOLL[ts] =
+        sum(value.(edmodel[:s])[:, :, 1] .* PriceCap[:, :, 1]) / EDSteps
+    EDEScost[ts] = sum(
+        value.(edmodel[:d])[:, :, 1] .* db[:, :] +
+        value.(edmodel[:c])[:, :, 1] .* cb[:, :],
+    )
+    EDcost[ts] =
+        EDGMCcost[ts] +
+        EDGSMCcost[ts] +
+        EDVOLL[ts] +
+        EDEScost[ts] +
+        sum(
+            EDU[:, (h-1)*EDSteps+t] .* params.GNLC * FuelAdjustment / EDSteps +
+            EDV[:, (h-1)*EDSteps+t] .* params.GSUC,
+        )
+    EDGPIni = value.(edmodel[:guc])[:, 1]
+    EDGdf = DataFrame(EDGPIni', :auto)
+    CSV.write(joinpath(output_folder, "EDGen.csv"), EDGdf, append = true)
+    # EDReGen = value.(edmodel[:gr])[:, 1]
+    # EDReGendf = DataFrame(EDReGen', :auto)
+    # CSV.write(
+    #     joinpath(output_folder, "EDRenewable.csv"),
+    #     EDReGendf,
+    #     append = true,
+    # )
+    # EDHydroGen = value.(edmodel[:gh])[:, 1]
+    # EDHydroGendf = DataFrame(EDHydroGen', :auto)
+    # CSV.write(
+    #     joinpath(output_folder, "EDHydro.csv"),
+    #     EDHydroGendf,
+    #     append = true,
+    # )
+    # CSV.write(
+    #     joinpath(output_folder, "EDDbid.csv"),
+    #     DataFrame(EDDBidInput[:, 1]', :auto),
+    #     append = true,
+    # )
+    # CSV.write(
+    #     joinpath(output_folder, "EDCbid.csv"),
+    #     DataFrame(EDCBidInput[:, 1]', :auto),
+    #     append = true,
+    # )
+    EDESD = value.(edmodel[:totald])[:, 1]
+    EDESDdf = DataFrame(EDESD', :auto)
+    CSV.write(joinpath(output_folder, "EDESD.csv"), EDESDdf, append = true)
+    EDESC = value.(edmodel[:totalc])[:, 1]
+    EDESCdf = DataFrame(EDESC', :auto)
+    CSV.write(joinpath(output_folder, "EDESC.csv"), EDESCdf, append = true)
+    EDSegSOCini = value.(edmodel[:e])[:, :, 1]
+    EDSOCini = value.(edmodel[:totale])[:, 1]
+    EDSOCinidf = DataFrame(EDSOCini', :auto)
+    CSV.write(
+        joinpath(output_folder, "EDSOCini.csv"),
+        EDSOCinidf,
+        append = true,
+    )
+    EDTrans = value.(edmodel[:f])[:, 1]
+    EDTransdf = DataFrame(EDTrans', :auto)
+    CSV.write(joinpath(output_folder, "EDTrans.csv"), EDTransdf, append = true)
+    EDS = value.(edmodel[:totals])[:, 1]
+    EDSdf = DataFrame(EDS', :auto)
+    CSV.write(joinpath(output_folder, "EDSlack.csv"), EDSdf, append = true)
+    EDprice = dual.(edmodel[:LoadBalance])[:, 1]
+    EDpricedf = DataFrame(EDprice', :auto)
+    CSV.write(joinpath(output_folder, "EDprice.csv"), EDpricedf, append = true)
+    all_EDprices_df = vcat(all_EDprices_df, EDpricedf)
+    EDESRev =
+        EDprice[storagezone] .*
+        (value.(edmodel[:totald])[:, 1] - value.(edmodel[:totalc])[:, 1])
+    CSV.write(
+        joinpath(output_folder, "EDESRev.csv"),
+        DataFrame(EDESRev', :auto),
+        append = true,
+    )
+    EDGZone = DataFrame(value.(edmodel[:guc])[:, 1]' * params.genmap, :auto)
+    CSV.write(joinpath(output_folder, "EDGenZone.csv"), EDGZone, append = true)
+    # EDHydroZone = DataFrame(
+    #     value.(edmodel[:gh])[:, 1]' * params.hydromap,
+    #     :auto,
+    # )
+    # CSV.write(
+    #     joinpath(output_folder, "EDHydroZone.csv"),
+    #     EDHydroZone,
+    #     append = true,
+    # )
+    EDHydroZone = DataFrame(value.(edmodel[:gh])[:, 1]', :auto)
+    CSV.write(
+        joinpath(output_folder, "EDHydroZone.csv"),
+        EDHydroZone,
+        append = true,
+    )
+    # EDRenewableZone = DataFrame(
+    #     value.(edmodel[:gr])[:, 1]' * params.renewablemap,
+    #     :auto,
+    # )
+    # CSV.write(
+    #     joinpath(output_folder, "EDRenewableZone.csv"),
+    #     EDRenewableZone,
+    #     append = true,
+    # )
+    EDSolarZone = DataFrame(value.(edmodel[:gs])[:, 1]', :auto)
+    CSV.write(
+        joinpath(output_folder, "EDSolarZone.csv"),
+        EDSolarZone,
+        append = true,
+    )
+    EDWindZone = DataFrame(value.(edmodel[:gw])[:, 1]', :auto)
+    CSV.write(
+        joinpath(output_folder, "EDWindZone.csv"),
+        EDWindZone,
+        append = true,
+    )
+    EDESDisZone =
+        DataFrame(value.(edmodel[:totald])[:, 1]' * params.storagemap, :auto)
+    CSV.write(
+        joinpath(output_folder, "EDESDisZone.csv"),
+        EDESDisZone,
+        append = true,
+    )
+    EDESChaZone =
+        DataFrame(value.(edmodel[:totalc])[:, 1]' * params.storagemap, :auto)
+    CSV.write(
+        joinpath(output_folder, "EDESChaZone.csv"),
+        EDESChaZone,
+        append = true,
+    )
+    EDSOCZone =
+        DataFrame(value.(edmodel[:totale])[:, 1]' * params.storagemap, :auto)
+    CSV.write(
+        joinpath(output_folder, "EDSoCZone.csv"),
+        EDSOCZone,
+        append = true,
+    )
+    # Update initial generation output for next time step
+    for i in axes(params.GPIni, 1)
+        # if (h - 1) * EDSteps + t != UCHorizon * EDSteps
+        set_normalized_rhs(
+            edmodel[:RUIni][i],
+            EDGPIni[i] +
+            params.GRU[i] / EDSteps +
+            (params.GPmin[i]) * EDV[i, (h-1)*EDSteps+t+1],
+        )
+        set_normalized_rhs(
+            edmodel[:RDIni][i],
+            -EDGPIni[i] +
+            params.GRD[i] / EDSteps +
+            (params.GPmax[i]) * EDW[i, (h-1)*EDSteps+t+1],
+        )
+        # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i] + GPmin[i]*EDV[i,(h - 1) * EDSteps + t + 1])
+        # set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i] + GPmin[i]*EDW[i,(h - 1) * EDSteps + t + 1])
+        # end
+    end
+    for i in axes(EDSOCini, 1)
+        for s in 1:ESSeg
+            set_normalized_rhs(edmodel[:StorageSOCIni][i, s], EDSegSOCini[i, s])
+        end
+    end
+    return EDGPIni, EDSOCini, all_EDprices_df
+end
+
 # Solving unit commitment and economic dispatch model by iterativly updating parameters
 function solving(
     params::STESTS.ModelParams,
@@ -75,6 +678,7 @@ function solving(
     GPIniInput = params.GPIni
     all_UCprices_df = DataFrame()
     all_EDprices_df = DataFrame()
+
     EDprice24 = Array{Float64}(undef, 24, size(params.storagemap, 2))
     vda = Array{Float64}(undef, size(params.storagemap, 1), 24 + 1)
     DAdb = Array{Float64}(undef, size(params.storagemap, 1), 24 + 1)
@@ -85,6 +689,7 @@ function solving(
         ESSeg,
         24 * EDSteps + 1,
     )
+
     db = Array{Float64}(undef, size(params.storagemap, 1), ESSeg)
     cb = Array{Float64}(undef, size(params.storagemap, 1), ESSeg)
     AdjustedUCL = params.UCL * LoadAdjustment
@@ -99,6 +704,7 @@ function solving(
     AdjustedEDWind = Wind_repeated - WindError * ErrorAdjustment
 
     set_optimizer_attribute(ucmodel, "MIPGap", 0.001)
+
     for d in 1:Nday
         # Update load and renewable generation
         LInput = convert(
@@ -121,6 +727,7 @@ function solving(
             Matrix{Float64},
             params.WAvail[24*(d-1)+1:24*d+UCHorizon-24, :]',
         )
+
         if d == 1 || !strategic
             DAdb = convert(
                 Matrix{Float64},
@@ -133,7 +740,7 @@ function solving(
         else
             # generate OCB DA bids (non-AI for all ES)
             EDprice288 = all_EDprices_df[(end-287):end, :] .* EDSteps
-            for col in 1:size(params.UCL, 2)
+            for col in 1:7
                 EDprice24[:, col] =
                     mean(reshape(EDprice288[!, col], 12, :), dims = 1)
             end
@@ -149,6 +756,7 @@ function solving(
                 DAcb[i, :] = -vda[i, :] .* params.Eeta[i]
             end
         end
+
         DAdbdf = DataFrame(DAdb', :auto)
         CSV.write(
             joinpath(output_folder, "UCESDBids.csv"),
@@ -161,60 +769,21 @@ function solving(
             DAcbdf,
             append = true,
         )
-        for h in 1:UCHorizon
-            # set_normalized_rhs(ucmodel[:Reserve][h], (1 + 0.2) * sum(DInput[:, h])-sum(HAvailInput[:, h])-sum(RAvailInput[:, h]))
-            for z in axes(LInput, 1)
-                set_normalized_rhs(ucmodel[:LoadBalance][z, h], LInput[z, h])
-                set_normalized_rhs(
-                    ucmodel[:Reserve][h],
-                    RM * sum(LInput, dims = 1)[h],
-                )
-                set_normalized_rhs(ucpmodel[:LoadBalance][z, h], LInput[z, h])
-                set_normalized_rhs(
-                    ucpmodel[:Reserve][h],
-                    RM * sum(LInput, dims = 1)[h],
-                )
-            end
-            for i in axes(HAvailInput, 1)
-                set_normalized_rhs(ucmodel[:HCap][i, h], HAvailInput[i, h])
-                set_normalized_rhs(ucpmodel[:HCap][i, h], HAvailInput[i, h])
-            end
-            # for i in axes(RAvailInput, 1)
-            #     set_normalized_rhs(ucmodel[:ReCap][i, h], RAvailInput[i, h])
-            #     set_normalized_rhs(ucpmodel[:ReCap][i, h], RAvailInput[i, h])
-            # end
-            for z in axes(SAvailInput, 1)
-                set_normalized_rhs(ucmodel[:SCap][z, h], SAvailInput[z, h])
-                set_normalized_rhs(ucpmodel[:SCap][z, h], SAvailInput[z, h])
-            end
-            for z in axes(WAvailInput, 1)
-                set_normalized_rhs(ucmodel[:WCap][z, h], WAvailInput[z, h])
-                set_normalized_rhs(ucpmodel[:WCap][z, h], WAvailInput[z, h])
-            end
-            for i in axes(DADBids, 1)
-                set_objective_coefficient(
-                    ucmodel,
-                    ucmodel[:d][i, h],
-                    DAdb[i, h],
-                )
-                set_objective_coefficient(
-                    ucmodel,
-                    ucmodel[:c][i, h],
-                    DAcb[i, h],
-                )
-                set_objective_coefficient(
-                    ucpmodel,
-                    ucpmodel[:d][i, h],
-                    DAdb[i, h],
-                )
-                set_objective_coefficient(
-                    ucpmodel,
-                    ucpmodel[:c][i, h],
-                    DAcb[i, h],
-                )
-            end
-        end
 
+        # Set unit commitment model constraints
+        setUCConstraints(
+            ucmodel,
+            ucpmodel,
+            LInput,
+            HAvailInput,
+            WAvailInput,
+            SAvailInput,
+            DADBids,
+            DAdb,
+            DAcb,
+            UCHorizon,
+            RM,
+        )
         # Solve unit commitment model
         @info "Solving day $d UC."
         optimize!(ucmodel)
@@ -252,91 +821,15 @@ function solving(
             Vdf = DataFrame(V', :auto)
             Wdf = DataFrame(W', :auto)
             Sdf = DataFrame(S', :auto)
-            CSV.write(
-                joinpath(output_folder, "UCCommit.csv"),
-                Udf,
-                append = true,
-            )
-            CSV.write(
-                joinpath(output_folder, "UCStart.csv"),
-                Vdf,
-                append = true,
-            )
-            CSV.write(joinpath(output_folder, "UCShut.csv"), Wdf, append = true)
-            CSV.write(
-                joinpath(output_folder, "UCSlack.csv"),
-                Sdf,
-                append = true,
-            )
-            UCGdf = DataFrame(value.(ucmodel[:guc])', :auto)
-            CSV.write(
-                joinpath(output_folder, "UCGen.csv"),
-                UCGdf,
-                append = true,
-            )
-            # UCRedf = DataFrame(value.(ucmodel[:gr])', :auto)
-            # CSV.write(
-            #     joinpath(output_folder, "UCRenewable.csv"),
-            #     UCRedf,
-            #     append = true,
-            # )
-            UCSolardf = DataFrame(value.(ucmodel[:gs])', :auto)
-            CSV.write(
-                joinpath(output_folder, "UCSolar.csv"),
-                UCSolardf,
-                append = true,
-            )
-            UCWinddf = DataFrame(value.(ucmodel[:gw])', :auto)
-            CSV.write(
-                joinpath(output_folder, "UCWind.csv"),
-                UCWinddf,
-                append = true,
-            )
-            UCHdf = DataFrame(value.(ucmodel[:gh])', :auto)
-            CSV.write(
-                joinpath(output_folder, "UCHydro.csv"),
-                UCHdf,
-                append = true,
-            )
-            UCGZone = DataFrame(value.(ucmodel[:guc])' * params.genmap, :auto)
-            CSV.write(
-                joinpath(output_folder, "UCGenZone.csv"),
-                UCGZone,
-                append = true,
-            )
-            # UCHydroZone =
-            #     DataFrame(value.(ucmodel[:gh])' * params.hydromap, :auto)
-            # CSV.write(
-            #     joinpath(output_folder, "UCHydroZone.csv"),
-            #     UCHydroZone,
-            #     append = true,
-            # )
-            # UCRenewableZone =
-            #     DataFrame(value.(ucmodel[:gr])' * params.renewablemap, :auto)
-            # CSV.write(
-            #     joinpath(output_folder, "UCRenewableZone.csv"),
-            #     UCRenewableZone,
-            #     append = true,
-            # )
-            UCSoCZone =
-                DataFrame(value.(ucmodel[:e])' * params.storagemap, :auto)
-            CSV.write(
-                joinpath(output_folder, "UCSoCZone.csv"),
-                UCSoCZone,
-                append = true,
-            )
-            UCFdf = DataFrame(value.(ucmodel[:f])', :auto)
-            CSV.write(
-                joinpath(output_folder, "UCTrans.csv"),
-                UCFdf,
-                append = true,
-            )
+
+            writeUCtoCSV(params, output_folder, ucmodel, Udf, Vdf, Wdf, Sdf)
 
             # Update status and must up/down constraints for next day
             SU = getLastOneIndex(V[:, 1:24], SU, params.GUT)
             SD = getLastOneIndex(W[:, 1:24], SD, params.GDT)
             SUInt = zeros(Int, size(params.GPIni, 1), UCHorizon)
             SDInt = zeros(Int, size(params.GPIni, 1), UCHorizon)
+
             for i in axes(params.GPIni, 1)
                 num_ones_SU = min(SU[i], UCHorizon)
                 num_ones_SD = min(SD[i], UCHorizon)
@@ -362,45 +855,7 @@ function solving(
                 end
             end
 
-            # Calculate day-ahead price
-            for i in axes(params.GPIni, 1)
-                for h in 1:UCHorizon
-                    set_normalized_rhs(
-                        ucpmodel[:UnitReserve1][i, h],
-                        params.GPmax[i] * U[i, h],
-                    )
-                    set_normalized_rhs(
-                        ucpmodel[:UCGenSeg1][i, h],
-                        params.GPmin[i] * U[i, h],
-                    )
-                    set_normalized_rhs(
-                        ucpmodel[:UCCapU][i, h],
-                        params.GPmax[i] * U[i, h],
-                    )
-                    set_normalized_rhs(
-                        ucpmodel[:UCCapL][i, h],
-                        params.GPmin[i] * U[i, h],
-                    )
-                end
-                for h in 1:(UCHorizon-1)
-                    set_normalized_rhs(
-                        ucpmodel[:RU][i, h],
-                        params.GRU[i] + params.GPmin[i] * V[i, h+1],
-                    )
-                    set_normalized_rhs(
-                        ucpmodel[:RD][i, h],
-                        params.GRD[i] + params.GPmin[i] * W[i, h+1],
-                    )
-                end
-                set_normalized_rhs(
-                    ucpmodel[:RUIni][i],
-                    params.GRU[i] + params.GPmin[i] * V[i, 1] + GPIniInput[i],
-                )
-                set_normalized_rhs(
-                    ucpmodel[:RDIni][i],
-                    params.GRD[i] + params.GPmin[i] * W[i, 1] - GPIniInput[i],
-                )
-            end
+            calculateDAP(params, ucpmodel, UCHorizon, U, V, W, GPIniInput)
 
             optimize!(ucpmodel)
             UCprice = dual.(ucpmodel[:LoadBalance][:, 1:24])
@@ -414,18 +869,14 @@ function solving(
             UCprice288 = repeat(UCprice', inner = (EDSteps, 1))
 
             # generate non-strategic RT bids
-            if strategic
-                for i in axes(RTDBids, 1)
-                    if d == 1 || params.EStrategic[i] == 0
-                        vrt[i, :, :] = generate_value_function(
-                            288,
-                            params.EPD[i] / params.ESOC[i] / EDSteps,
-                            params.Eeta[i],
-                            ESSeg,
-                            UCprice288 * params.storagemap[i, :],
-                        )
-                    end
-                end
+            for i in axes(RTDBids, 1)
+                vrt[i, :, :] = generate_value_function(
+                    288,
+                    params.EPD[i] / params.ESOC[i] / EDSteps,
+                    params.Eeta[i],
+                    ESSeg,
+                    UCprice288 * params.storagemap[i, :],
+                )
             end
 
             # Solving economic dispatch model
@@ -441,618 +892,79 @@ function solving(
             for h in 1:24
                 for t in 1:EDSteps
                     ts = ((d - 1) * 24 + h - 1) * EDSteps + t # time step
-                    EDLInput = convert(
-                        Matrix{Float64},
-                        AdjustedEDL[ts:ts+EDHorizon-1, :]',
-                    )
-                    EDHAvailInput = convert(
-                        Matrix{Float64},
-                        params.EDHAvail[ts:ts+EDHorizon-1, :]',
-                    )
-                    # EDRAvailInput = convert(
-                    #     Matrix{Float64},
-                    #     params.EDRAvail[ts:ts+EDHorizon-1, :]',
-                    # )
-                    EDSAvailInput = convert(
-                        Matrix{Float64},
-                        AdjustedEDSolar[ts:ts+EDHorizon-1, :]',
-                    )
-                    EDWAvailInput = convert(
-                        Matrix{Float64},
-                        AdjustedEDWind[ts:ts+EDHorizon-1, :]',
-                    )
                     EDDBidInput =
                         convert(Matrix{Float64}, RTDBids[:, ts:ts+EDHorizon-1])
                     EDCBidInput =
                         convert(Matrix{Float64}, RTCBids[:, ts:ts+EDHorizon-1])
-                    if d > 1
-                        last_24_UC = all_UCprices_df[(end-48+h):(end-25+h), :]
-                        last_36_ED =
-                            all_EDprices_df[
-                                (end-35-BAWindow):end-BAWindow,
-                                :,
-                            ] .* EDSteps
-                        predictors = vcat(last_24_UC, last_36_ED)
-                    end
-                    for tp in 1:EDHorizon
-                        # Ad hoc method to solve initial generation output for ED model
-                        if ts == 1 && tp == 1
-                            # if h == 1 && t == 1 && tp == 1
-                            for i in axes(params.GPIni, 1)
-                                set_normalized_rhs(
-                                    edmodel[:RUIni][i],
-                                    params.GPIni[i] +
-                                    params.GRU[i] +
-                                    (params.GPmin[i]) *
-                                    EDV[i, (h-1)*EDSteps+t+tp-1],
-                                )
-                                set_normalized_rhs(
-                                    edmodel[:RDIni][i],
-                                    -params.GPIni[i] +
-                                    params.GRD[i] +
-                                    (params.GPmin[i]) *
-                                    EDW[i, (h-1)*EDSteps+t+tp-1],
-                                )
-                                # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
-                                # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
-                            end
-                        elseif h == 1 && t == 1 && tp == 1
-                            for i in axes(params.GPIni, 1)
-                                set_normalized_rhs(
-                                    edmodel[:RUIni][i],
-                                    EDGPIni[i] +
-                                    params.GRU[i] / EDSteps +
-                                    (params.GPmin[i]) * EDV[i, 1],
-                                )
-                                set_normalized_rhs(
-                                    edmodel[:RDIni][i],
-                                    -EDGPIni[i] +
-                                    params.GRD[i] / EDSteps +
-                                    (params.GPmax[i]) * EDW[i, 1],
-                                )
-                                # set_normalized_rhs(edmodel[:RUIni][i], GPini[i] + GRU[i])
-                                # set_normalized_rhs(edmodel[:RDIni][i], -GPini[i] + GRD[i])
-                            end
-                        end
 
-                        # update energy storage bids
-                        if strategic
-                            # update bids for AI-Enhanced and Baseline energy storage
-                            # update bids for baseline energy storage using OCB
-                            for i in axes(RTDBids, 1)
-                                if params.EStrategic[i] == 0
-                                    db[i, :] =
-                                        (
-                                            vrt[i, :, (h-1)*EDSteps+t] ./
-                                            params.Eeta[i] .+ ESMC
-                                        ) / EDSteps
-                                    cb[i, :] =
-                                        -vrt[i, :, (h-1)*EDSteps+t] .*
-                                        params.Eeta[i] / EDSteps
-                                    if tp == 1
-                                        cbdf = DataFrame(12 * cb[i, :]', :auto)
-                                        dbdf = DataFrame(12 * db[i, :]', :auto)
-                                        CSV.write(
-                                            joinpath(
-                                                output_folder * "/NStrategic",
-                                                "EDESCB_" * "$i" * ".csv",
-                                            ),
-                                            cbdf,
-                                            append = true,
-                                        )
-                                        CSV.write(
-                                            joinpath(
-                                                output_folder * "/NStrategic",
-                                                "EDESDB_" * "$i" * ".csv",
-                                            ),
-                                            dbdf,
-                                            append = true,
-                                        )
-                                    end
-                                end
-                            end
+                    setEDConstraints(
+                        params,
+                        output_folder,
+                        edmodel,
+                        EDV,
+                        EDW,
+                        EDU,
+                        U,
+                        EDGPIni,
+                        EDSteps,
+                        BAWindow,
+                        strategic,
+                        bidmodels,
+                        db,
+                        cb,
+                        vrt,
+                        segment_length,
+                        ESSeg,
+                        RTDBids,
+                        RTCBids,
+                        AdjustedEDL,
+                        AdjustedEDSolar,
+                        AdjustedEDWind,
+                        all_UCprices_df,
+                        all_EDprices_df,
+                        EDHorizon,
+                        d,
+                        h,
+                        t,
+                        ts,
+                    )
 
-                            # update bids for AI-Enhanced energy storage using OCB + AI
-                            for (i, model) in bidmodels
-                                if d == 1
-                                    db[i, :] =
-                                        (
-                                            vrt[i, :, (h-1)*EDSteps+t] ./
-                                            params.Eeta[i] .+ ESMC
-                                        ) / EDSteps
-                                    cb[i, :] =
-                                        -vrt[i, :, (h-1)*EDSteps+t] .*
-                                        params.Eeta[i] / EDSteps
-                                else
-                                    v = model(
-                                        predictors[
-                                            :,
-                                            findfirst(
-                                                isequal(1),
-                                                params.storagemap[i, :],
-                                            ),
-                                        ],
-                                    )
-                                    vavg = [
-                                        mean(
-                                            v[(i-1)*segment_length+1:i*segment_length],
-                                        ) for i in 1:ESSeg
-                                    ]
-                                    enforce_strictly_decreasing_vector(vavg)
-                                    cb[i, :] .= -vavg .* 0.9 ./ EDSteps
-                                    db[i, :] .= (vavg ./ 0.9 .+ ESMC) ./ EDSteps
-                                end
-                                if tp == 1
-                                    cbdf = DataFrame(12 * cb[i, :]', :auto)
-                                    dbdf = DataFrame(12 * db[i, :]', :auto)
-                                    CSV.write(
-                                        joinpath(
-                                            output_folder * "/Strategic",
-                                            "EDESCB_" * "$i" * ".csv",
-                                        ),
-                                        cbdf,
-                                        append = true,
-                                    )
-                                    CSV.write(
-                                        joinpath(
-                                            output_folder * "/Strategic",
-                                            "EDESDB_" * "$i" * ".csv",
-                                        ),
-                                        dbdf,
-                                        append = true,
-                                    )
-                                end
-                            end
-
-                        else
-                            # update bids for all energy storage using historical bids
-                            for i in axes(RTDBids, 1)
-                                db[i, :] .= EDDBidInput[i, tp] / EDSteps
-                                cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
-                            end
-                        end
-
-                        # Update new bids in edmodel
-                        for i in axes(RTDBids, 1)
-                            for s in 1:ESSeg
-                                set_objective_coefficient(
-                                    edmodel,
-                                    edmodel[:d][i, s, tp],
-                                    db[i, s],
-                                )
-                                set_objective_coefficient(
-                                    edmodel,
-                                    edmodel[:c][i, s, tp],
-                                    cb[i, s],
-                                )
-                            end
-                        end
-
-                        # for i in axes(RTDBids, 1)
-                        #     if strategic && params.EStrategic[i] == 0
-                        #         # update bids for baseline energy storage using OCB
-                        #         db[i, :] =
-                        #             (
-                        #                 vrt[i, :, (h-1)*EDSteps+t] ./
-                        #                 params.Eeta[i] .+ ESMC
-                        #             ) / EDSteps
-                        #         cb[i, :] =
-                        #             -vrt[i, :, (h-1)*EDSteps+t] .*
-                        #             params.Eeta[i] / EDSteps
-                        #     else
-                        #         # update bids for all energy storage base on historical bids
-                        #         db[i, :] .= EDDBidInput[i, tp] / EDSteps
-                        #         cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
-                        #     end
-
-                        #     for s in 1:ESSeg
-                        #         set_objective_coefficient(
-                        #             edmodel,
-                        #             edmodel[:d][i, s, tp],
-                        #             db[i, s],
-                        #         )
-                        #         set_objective_coefficient(
-                        #             edmodel,
-                        #             edmodel[:c][i, s, tp],
-                        #             cb[i, s],
-                        #         )
-                        #     end
-                        #     if tp == 1
-                        #         cbdf = DataFrame(12 * cb[i, :]', :auto)
-                        #         dbdf = DataFrame(12 * db[i, :]', :auto)
-                        #         CSV.write(
-                        #             joinpath(
-                        #                 output_folder * "/NStrategic",
-                        #                 "EDESCB_" * "$i" * ".csv",
-                        #             ),
-                        #             cbdf,
-                        #             append = true,
-                        #         )
-                        #         CSV.write(
-                        #             joinpath(
-                        #                 output_folder * "/NStrategic",
-                        #                 "EDESDB_" * "$i" * ".csv",
-                        #             ),
-                        #             dbdf,
-                        #             append = true,
-                        #         )
-                        #     end
-                        # end
-
-                        # # update bids for AI-Enhanced energy storage
-                        # if strategic
-                        #     for (i, model) in bidmodels
-                        #         if d == 1
-                        #             # db[i, :] .= EDDBidInput[i, tp] / EDSteps
-                        #             # cb[i, :] .= -EDCBidInput[i, tp] / EDSteps
-                        #             db[i, :] =
-                        #                 (
-                        #                     vrt[i, :, (h-1)*EDSteps+t] ./
-                        #                     params.Eeta[i] .+ ESMC
-                        #                 ) / EDSteps
-                        #             cb[i, :] =
-                        #                 -vrt[i, :, (h-1)*EDSteps+t] .*
-                        #                 params.Eeta[i] / EDSteps
-                        #             # db[i, :] .=
-                        #             #     (
-                        #             #         params.storagemap[i, :]' *
-                        #             #         UCprice[:, h] / 0.9 + ESMC
-                        #             #     ) / EDSteps
-                        #             # cb[i, :] .=
-                        #             #     -params.storagemap[i, :]' *
-                        #             #     UCprice[:, h] *
-                        #             #     0.9 / EDSteps
-                        #         else
-                        #             v = model(
-                        #                 predictors[
-                        #                     :,
-                        #                     findfirst(
-                        #                         isequal(1),
-                        #                         params.storagemap[i, :],
-                        #                     ),
-                        #                 ],
-                        #             )
-                        #             vavg = [
-                        #                 mean(
-                        #                     v[(i-1)*segment_length+1:i*segment_length],
-                        #                 ) for i in 1:ESSeg
-                        #             ]
-                        #             enforce_strictly_decreasing_vector(vavg)
-                        #             cb[i, :] .= -vavg .* 0.9 ./ EDSteps
-                        #             db[i, :] .= (vavg ./ 0.9 .+ ESMC) ./ EDSteps
-                        #         end
-                        #         for s in 1:ESSeg
-                        #             set_objective_coefficient(
-                        #                 edmodel,
-                        #                 edmodel[:d][i, s, tp],
-                        #                 db[i, s],
-                        #             )
-                        #             set_objective_coefficient(
-                        #                 edmodel,
-                        #                 edmodel[:c][i, s, tp],
-                        #                 cb[i, s],
-                        #             )
-                        #         end
-                        #         if tp == 1
-                        #             cbdf = DataFrame(12 * cb[i, :]', :auto)
-                        #             dbdf = DataFrame(12 * db[i, :]', :auto)
-                        #             CSV.write(
-                        #                 joinpath(
-                        #                     output_folder * "/Strategic",
-                        #                     "EDESCB_" * "$i" * ".csv",
-                        #                 ),
-                        #                 cbdf,
-                        #                 append = true,
-                        #             )
-                        #             CSV.write(
-                        #                 joinpath(
-                        #                     output_folder * "/Strategic",
-                        #                     "EDESDB_" * "$i" * ".csv",
-                        #                 ),
-                        #                 dbdf,
-                        #                 append = true,
-                        #             )
-                        #         end
-                        #     end
-                        # end
-
-                        for z in axes(EDLInput, 1)
-                            set_normalized_rhs(
-                                edmodel[:LoadBalance][z, tp],
-                                EDLInput[z, tp],
-                            )
-                        end
-                        for i in axes(U, 1)
-                            set_normalized_rhs(
-                                edmodel[:UCCapU][i, tp],
-                                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmax[i],
-                            )
-                            set_normalized_rhs(
-                                edmodel[:UCCapL][i, tp],
-                                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmin[i],
-                            )
-                            set_normalized_rhs(
-                                edmodel[:UCGenSeg1][i, tp],
-                                EDU[i, (h-1)*EDSteps+t+tp-1] * params.GPmin[i],
-                            )
-                        end
-                        for i in axes(EDHAvailInput, 1)
-                            set_normalized_rhs(
-                                edmodel[:HCap][i, tp],
-                                EDHAvailInput[i, tp],
-                            )
-                        end
-                        # for i in axes(EDRAvailInput, 1)
-                        #     set_normalized_rhs(
-                        #         edmodel[:ReCap][i, tp],
-                        #         EDRAvailInput[i, tp],
-                        #     )
-                        # end
-                        for z in axes(EDSAvailInput, 1)
-                            set_normalized_rhs(
-                                edmodel[:SCap][z, tp],
-                                EDSAvailInput[z, tp],
-                            )
-                        end
-                        for z in axes(EDWAvailInput, 1)
-                            set_normalized_rhs(
-                                edmodel[:WCap][z, tp],
-                                EDWAvailInput[z, tp],
-                            )
-                        end
-                        if EDHorizon > 1 && tp > 1
-                            for i in axes(params.GPIni, 1)
-                                set_normalized_rhs(
-                                    edmodel[:RU][i, tp],
-                                    params.GRU[i] / EDSteps +
-                                    params.GPmin[i] *
-                                    EDV[i, (h-1)*EDSteps+t+tp-1],
-                                )
-                            end
-                            for i in axes(params.GPIni, 1)
-                                set_normalized_rhs(
-                                    edmodel[:RD][i, tp],
-                                    params.GRD[i] / EDSteps +
-                                    params.GPmax[i] *
-                                    EDW[i, (h-1)*EDSteps+t+tp-1],
-                                )
-                            end
-                        end
-                    end
                     # Solve economic dispatch model
                     @info "Solving day $d hour $h step $t ED."
                     optimize!(edmodel)
-                    # # Extract solution
-                    if termination_status(edmodel) == MOI.OPTIMAL
-                        EDGMCcost[ts] =
-                            sum(
-                                value.(edmodel[:guc])[:, 1] .* params.GMC *
-                                FuelAdjustment,
-                            ) / EDSteps
-                        EDGSMCcost[ts] =
-                            sum(
-                                value.(edmodel[:gucs])[:, :, 1] .*
-                                EDGSMC[:, :, 1] * FuelAdjustment,
-                            ) / EDSteps
-                        EDVOLL[ts] =
-                            sum(
-                                value.(edmodel[:s])[:, :, 1] .*
-                                PriceCap[:, :, 1],
-                            ) / EDSteps
-                        # TODO update bid cost
-                        EDEScost[ts] = sum(
-                            value.(edmodel[:d])[:, :, 1] .* db[:, :] +
-                            value.(edmodel[:c])[:, :, 1] .* cb[:, :],
-                        )
-                        EDcost[ts] =
-                            EDGMCcost[ts] +
-                            EDGSMCcost[ts] +
-                            EDVOLL[ts] +
-                            EDEScost[ts] +
-                            sum(
-                                EDU[:, (h-1)*EDSteps+t] .* params.GNLC *
-                                FuelAdjustment / EDSteps +
-                                EDV[:, (h-1)*EDSteps+t] .* params.GSUC,
-                            )
-                        EDGPIni = value.(edmodel[:guc])[:, 1]
-                        EDGdf = DataFrame(EDGPIni', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDGen.csv"),
-                            EDGdf,
-                            append = true,
-                        )
-                        # EDReGen = value.(edmodel[:gr])[:, 1]
-                        # EDReGendf = DataFrame(EDReGen', :auto)
-                        # CSV.write(
-                        #     joinpath(output_folder, "EDRenewable.csv"),
-                        #     EDReGendf,
-                        #     append = true,
-                        # )
-                        # EDHydroGen = value.(edmodel[:gh])[:, 1]
-                        # EDHydroGendf = DataFrame(EDHydroGen', :auto)
-                        # CSV.write(
-                        #     joinpath(output_folder, "EDHydro.csv"),
-                        #     EDHydroGendf,
-                        #     append = true,
-                        # )
-                        # CSV.write(
-                        #     joinpath(output_folder, "EDDbid.csv"),
-                        #     DataFrame(EDDBidInput[:, 1]', :auto),
-                        #     append = true,
-                        # )
-                        # CSV.write(
-                        #     joinpath(output_folder, "EDCbid.csv"),
-                        #     DataFrame(EDCBidInput[:, 1]', :auto),
-                        #     append = true,
-                        # )
-                        EDESD = value.(edmodel[:totald])[:, 1]
-                        EDESDdf = DataFrame(EDESD', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDESD.csv"),
-                            EDESDdf,
-                            append = true,
-                        )
-                        EDESC = value.(edmodel[:totalc])[:, 1]
-                        EDESCdf = DataFrame(EDESC', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDESC.csv"),
-                            EDESCdf,
-                            append = true,
-                        )
-                        EDSegSOCini = value.(edmodel[:e])[:, :, 1]
-                        EDSOCini = value.(edmodel[:totale])[:, 1]
-                        EDSOCinidf = DataFrame(EDSOCini', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDSOCini.csv"),
-                            EDSOCinidf,
-                            append = true,
-                        )
-                        EDTrans = value.(edmodel[:f])[:, 1]
-                        EDTransdf = DataFrame(EDTrans', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDTrans.csv"),
-                            EDTransdf,
-                            append = true,
-                        )
-                        EDS = value.(edmodel[:totals])[:, 1]
-                        EDSdf = DataFrame(EDS', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDSlack.csv"),
-                            EDSdf,
-                            append = true,
-                        )
-                        EDprice = dual.(edmodel[:LoadBalance])[:, 1]
-                        EDpricedf = DataFrame(EDprice', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDprice.csv"),
-                            EDpricedf,
-                            append = true,
-                        )
-                        all_EDprices_df = vcat(all_EDprices_df, EDpricedf)
-                        EDESRev =
-                            EDprice[storagezone] .* (
-                                value.(edmodel[:totald])[:, 1] -
-                                value.(edmodel[:totalc])[:, 1]
-                            )
-                        CSV.write(
-                            joinpath(output_folder, "EDESRev.csv"),
-                            DataFrame(EDESRev', :auto),
-                            append = true,
-                        )
-                        EDGZone = DataFrame(
-                            value.(edmodel[:guc])[:, 1]' * params.genmap,
-                            :auto,
-                        )
-                        CSV.write(
-                            joinpath(output_folder, "EDGenZone.csv"),
-                            EDGZone,
-                            append = true,
-                        )
-                        # EDHydroZone = DataFrame(
-                        #     value.(edmodel[:gh])[:, 1]' * params.hydromap,
-                        #     :auto,
-                        # )
-                        # CSV.write(
-                        #     joinpath(output_folder, "EDHydroZone.csv"),
-                        #     EDHydroZone,
-                        #     append = true,
-                        # )
-                        EDHydroZone =
-                            DataFrame(value.(edmodel[:gh])[:, 1]', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDHydroZone.csv"),
-                            EDHydroZone,
-                            append = true,
-                        )
-                        # EDRenewableZone = DataFrame(
-                        #     value.(edmodel[:gr])[:, 1]' * params.renewablemap,
-                        #     :auto,
-                        # )
-                        # CSV.write(
-                        #     joinpath(output_folder, "EDRenewableZone.csv"),
-                        #     EDRenewableZone,
-                        #     append = true,
-                        # )
-                        EDSolarZone =
-                            DataFrame(value.(edmodel[:gs])[:, 1]', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDSolarZone.csv"),
-                            EDSolarZone,
-                            append = true,
-                        )
-                        EDWindZone =
-                            DataFrame(value.(edmodel[:gw])[:, 1]', :auto)
-                        CSV.write(
-                            joinpath(output_folder, "EDWindZone.csv"),
-                            EDWindZone,
-                            append = true,
-                        )
-                        EDESDisZone = DataFrame(
-                            value.(edmodel[:totald])[:, 1]' * params.storagemap,
-                            :auto,
-                        )
-                        CSV.write(
-                            joinpath(output_folder, "EDESDisZone.csv"),
-                            EDESDisZone,
-                            append = true,
-                        )
-                        EDESChaZone = DataFrame(
-                            value.(edmodel[:totalc])[:, 1]' * params.storagemap,
-                            :auto,
-                        )
-                        CSV.write(
-                            joinpath(output_folder, "EDESChaZone.csv"),
-                            EDESChaZone,
-                            append = true,
-                        )
-                        EDSOCZone = DataFrame(
-                            value.(edmodel[:totale])[:, 1]' * params.storagemap,
-                            :auto,
-                        )
-                        CSV.write(
-                            joinpath(output_folder, "EDSoCZone.csv"),
-                            EDSOCZone,
-                            append = true,
-                        )
-                        # Update initial generation output for next time step
-                        for i in axes(params.GPIni, 1)
-                            # if (h - 1) * EDSteps + t != UCHorizon * EDSteps
-                            set_normalized_rhs(
-                                edmodel[:RUIni][i],
-                                EDGPIni[i] +
-                                params.GRU[i] / EDSteps +
-                                (params.GPmin[i]) * EDV[i, (h-1)*EDSteps+t+1],
-                            )
-                            set_normalized_rhs(
-                                edmodel[:RDIni][i],
-                                -EDGPIni[i] +
-                                params.GRD[i] / EDSteps +
-                                (params.GPmax[i]) * EDW[i, (h-1)*EDSteps+t+1],
-                            )
-                            # set_normalized_rhs(edmodel[:RUIni][i], EDGPini[i] + GRU[i] + GPmin[i]*EDV[i,(h - 1) * EDSteps + t + 1])
-                            # set_normalized_rhs(edmodel[:RDIni][i], -EDGPini[i] + GRD[i] + GPmin[i]*EDW[i,(h - 1) * EDSteps + t + 1])
-                            # end
-                        end
-                        for i in axes(EDSOCini, 1)
-                            for s in 1:ESSeg
-                                set_normalized_rhs(
-                                    edmodel[:StorageSOCIni][i, s],
-                                    EDSegSOCini[i, s],
-                                )
-                            end
-                        end
-                    else
-                        println("Model is infeasible. Starting IIS analysis...")
-                        compute_conflict!(edmodel)
-                        iis_model, _ = copy_conflict(edmodel)
-                        open("diagnose_output_ed.txt", "w") do f
-                            return write(f, string(iis_model))
-                        end
-                        print(iis_model)
 
-                        error(
-                            "No optimal solution found for ED at hour $h step $t.",
-                        )
+                    # Extract solution
+                    if termination_status(edmodel) == MOI.OPTIMAL
+                        EDGPIni, EDSOCini, all_EDprices_df =
+                            writeEDtoCSVandUpdateSOC(
+                                params,
+                                output_folder::String,
+                                edmodel,
+                                EDDBidInput,
+                                EDCBidInput,
+                                EDU,
+                                EDV,
+                                EDW,
+                                db,
+                                cb,
+                                all_EDprices_df,
+                                storagezone,
+                                PriceCap,
+                                FuelAdjustment,
+                                EDGSMC,
+                                EDGMCcost,
+                                EDGSMCcost,
+                                EDVOLL,
+                                EDEScost,
+                                EDcost,
+                                EDSteps,
+                                ESSeg,
+                                d,
+                                h,
+                                t,
+                            )
+                    else
+                        solvingError(edmodel, "ED", 0, h, t)
                     end
                     # Update initial generation output for next day
                     if h == 24 && t == 1
@@ -1089,15 +1001,8 @@ function solving(
                     end
                 end
             end
-
         else
-            println("Model is infeasible. Starting IIS analysis...")
-            compute_conflict!(ucmodel)
-            iis_model, _ = copy_conflict(ucmodel)
-            open("diagnose_output.txt", "w") do f
-                return write(f, string(iis_model))
-            end
-            error("No optimal solution found for UC on day $d.")
+            solvingError(ucmodel, "UC", d, 0, 0)
         end
     end
     EDcostdf = DataFrame(cost = EDcost)
