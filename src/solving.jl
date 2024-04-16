@@ -223,6 +223,7 @@ function setEDConstraints(
     h,
     t,
     ts,
+    ESMC,
 )
     # Initialize ED matrices
     EDLInput = convert(Matrix{Float64}, AdjustedEDL[ts:ts+EDHorizon-1, :]')
@@ -740,7 +741,7 @@ function solving(
         else
             # generate OCB DA bids (non-AI for all ES)
             EDprice288 = all_EDprices_df[(end-287):end, :] .* EDSteps
-            for col in 1:7
+            for col in 1:size(params.UCL, 2)
                 EDprice24[:, col] =
                     mean(reshape(EDprice288[!, col], 12, :), dims = 1)
             end
@@ -927,6 +928,7 @@ function solving(
                         h,
                         t,
                         ts,
+                        ESMC,
                     )
 
                     # Solve economic dispatch model
