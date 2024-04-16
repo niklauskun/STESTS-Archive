@@ -289,7 +289,7 @@ function setEDConstraints(
             # update bids for AI-Enchanced and Baseline energy storage
             # update bids for baseline energy storage using OCB
             for i in axes(RTDBids, 1)
-                if params.EStragetic[i] == 0
+                if params.EStrategic[i] == 0
                     db[i, :] =
                         (vrt[i, :, (h-1)*EDSteps+t] ./ params.Eeta[i] .+ ESMC) /
                         EDSteps
