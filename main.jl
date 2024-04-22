@@ -1,12 +1,13 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
-Year = 2022
+Year = 2030
 # Read data from .jld2 file 
-params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS_" * "$Year" * ".jld2")
-strategic = false
+params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS_AggES_" * "$Year" * ".jld2")
+strategic = true
+heto = false
 RandomModel = false
 RandomSeed = 1
-ratio = 1.0
+ratio = 0.5
 RM = 0.03
 VOLL = 9000.0
 NDay = 2
@@ -26,6 +27,7 @@ PriceCap = repeat(
 FuelAdjustment = 1.2
 ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
+ESAdjustment = 2.7 # 2.7 for 2030 to 20GW
 
 output_folder =
     "output/Strategic/" *
@@ -46,7 +48,7 @@ output_folder =
     "$ESMC" *
     "_" *
     "$RandomSeed" *
-    "test2"
+    "test"
 mkpath(output_folder)
 
 # model_filenames = [
@@ -66,25 +68,8 @@ storagebidmodels = []
 if strategic
     mkpath(output_folder * "/Strategic")
     mkpath(output_folder * "/NStrategic")
-    if ratio == 1.0
-        for i in eachindex(params.Eeta)
-            if params.Eeta[i] == 0.8
-                params.EStrategic[i] = 0
-            elseif params.Eeta[i] == 0.9
-                params.EStrategic[i] = 1
-            else
-                # Handle unexpected case, if necessary
-                println(
-                    "Unexpected value in params.Eeta at index $i: ",
-                    params.Eeta[i],
-                )
-            end
-        end
-    elseif ratio == 0.0
-        println("No AI-Powered BES.")
-    else
-        STESTS.update_battery_storage!(params, ratio, output_folder)
-    end
+    STESTS.update_battery_storage!(params, ratio, output_folder, heto)
+
     # bidmodels = STESTS.loadbidmodels(model_filenames)
     bidmodels = STESTS.loadbidmodels(model_base_folder)
     storagebidmodels = STESTS.assign_models_to_storages(
