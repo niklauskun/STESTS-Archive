@@ -194,7 +194,17 @@ function update_battery_storage!(
     ratio::Float64,
     output_folder::String,
     heto::Bool,
+    ESAdjustment::Float64,
 )
+    # Update the battery storage capacity
+    for i in eachindex(params.Eeta)
+        if params.Eeta[i] == 0.9
+            params.EPC[i] *= ESAdjustment
+            params.EPD[i] *= ESAdjustment
+            params.ESOC[i] *= ESAdjustment
+            params.ESOCini[i] *= ESAdjustment
+        end
+    end
     if ratio == 1.0
         println("All AI-Powered BES.")
         for i in eachindex(params.Eeta)

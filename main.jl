@@ -7,7 +7,7 @@ strategic = true
 heto = false
 RandomModel = false
 RandomSeed = 1
-ratio = 0.5
+ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
 NDay = 2
@@ -68,7 +68,13 @@ storagebidmodels = []
 if strategic
     mkpath(output_folder * "/Strategic")
     mkpath(output_folder * "/NStrategic")
-    STESTS.update_battery_storage!(params, ratio, output_folder, heto)
+    STESTS.update_battery_storage!(
+        params,
+        ratio,
+        output_folder,
+        heto,
+        ESAdjustment,
+    )
 
     # bidmodels = STESTS.loadbidmodels(model_filenames)
     bidmodels = STESTS.loadbidmodels(model_base_folder)
