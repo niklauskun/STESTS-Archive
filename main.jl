@@ -1,16 +1,16 @@
 using STESTS, JuMP, Gurobi, CSV, DataFrames, Statistics, SMTPClient
 
-Year = 2030
+Year = 2022
 # Read data from .jld2 file 
 params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS_AggES_" * "$Year" * ".jld2")
 strategic = true
-heto = false
+heto = true
 RandomModel = false
 RandomSeed = 1
 ratio = 1.0
 RM = 0.03
 VOLL = 9000.0
-NDay = 2
+NDay = 364
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
@@ -27,7 +27,7 @@ PriceCap = repeat(
 FuelAdjustment = 1.2
 ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
-ESAdjustment = 2.7 # 2.7 for 2030 to 20GW
+ESAdjustment = 1.0 # 2.7 for 2030 to 20GW
 
 output_folder =
     "output/Strategic/" *

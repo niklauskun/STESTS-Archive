@@ -205,6 +205,92 @@ function update_battery_storage!(
             params.ESOCini[i] *= ESAdjustment
         end
     end
+    if heto
+        # Retrieve the new entries and their corresponding regions from params
+        # Initialize temporary storage for new discrete entries
+        new_storagemap = copy(params.storagemap)
+        new_Eeta = Float64[]
+        new_EPC = Float64[]
+        new_EPD = Float64[]
+        new_ESOC = Float64[]
+        new_ESOCini = Float64[]
+        new_EStrategic = Int64[]
+        remove_indices = Int[]
+
+        # Process each entry for discretization if Eeta == 0.9
+        for i in eachindex(params.Eeta)
+            if params.Eeta[i] == 0.9
+                epd = params.EPD[i]
+                eeta = params.Eeta[i]
+                append!(remove_indices, i)  # Mark this index for removal
+
+                # Decompose EPD
+                components = [1000, 100, 10, 1]
+                for comp in components
+                    count = floor(epd / comp)
+                    epd -= count * comp
+                    for _ in 1:count
+                        append!(new_Eeta, eeta)
+                        append!(new_EPC, comp)
+                        append!(new_EPD, comp)
+                        append!(new_ESOC, 4 * comp)
+                        append!(new_ESOCini, 2 * comp)
+                        append!(new_EStrategic, 0)  # Assuming true strategic value as integer
+
+                        # Create and append new row for storagemap corresponding to the region
+                        new_storagemap =
+                            vcat(new_storagemap, params.storagemap[i, :]')  # Append column-wise
+                    end
+                end
+
+                # Handle residual
+                if epd > 0
+                    append!(new_Eeta, eeta)
+                    append!(new_EPC, epd)
+                    append!(new_EPD, epd)
+                    append!(new_ESOC, 4 * epd)
+                    append!(new_ESOCini, 2 * epd)
+                    append!(new_EStrategic, 0)  # Assuming true strategic value as integer
+
+                    # Create and append new row for storagemap corresponding to the region
+                    new_storagemap =
+                        vcat(new_storagemap, params.storagemap[i, :]')  # Append column-wise
+                end
+            end
+        end
+
+        # Update params with the new discrete storages
+        params.Eeta = vcat(params.Eeta, new_Eeta)
+        params.EPC = vcat(params.EPC, new_EPC)
+        params.EPD = vcat(params.EPD, new_EPD)
+        params.ESOC = vcat(params.ESOC, new_ESOC)
+        params.ESOCini = vcat(params.ESOCini, new_ESOCini)
+        params.EStrategic = vcat(params.EStrategic, new_EStrategic)
+        params.storagemap = new_storagemap
+
+        # # Remove aggregated entries
+        remove_indices = sort(unique(remove_indices))
+        mask = trues(length(params.Eeta))
+        mask[remove_indices] .= false
+        params.Eeta = params.Eeta[mask]
+        params.EPC = params.EPC[mask]
+        params.EPD = params.EPD[mask]
+        params.ESOC = params.ESOC[mask]
+        params.ESOCini = params.ESOCini[mask]
+        params.EStrategic = params.EStrategic[mask]
+        params.storagemap = params.storagemap[mask, :]
+
+        # save the new configurations to CSV
+        df = DataFrame(
+            Eeta = new_Eeta,
+            EPC = new_EPC,
+            EPD = new_EPD,
+            ESOC = new_ESOC,
+            ESOCini = new_ESOCini,
+            EStrategic = new_EStrategic,
+        )
+        CSV.write(joinpath(output_folder * "/Strategic", "ADDED_ES.csv"), df)
+    end
     if ratio == 1.0
         println("All AI-Powered BES.")
         for i in eachindex(params.Eeta)
@@ -223,6 +309,9 @@ function update_battery_storage!(
     elseif ratio == 0.0
         println("No AI-Powered BES.")
     else
+        if heto
+            error("No heterogenous ES if ISR is not 0.0 or 1.0")
+        end
         println("ISR AI-Powered BES.")
         # Assume additional fields in Params for simplicity of explanation
         new_storagemap = copy(params.storagemap)
