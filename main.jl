@@ -10,7 +10,7 @@ RandomSeed = 1
 ratio = 0.5
 RM = 0.03
 VOLL = 9000.0
-NDay = 2
+NDay = 364
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
@@ -46,9 +46,8 @@ output_folder =
     "$BAWindow" *
     "_MC" *
     "$ESMC" *
-    "_" *
-    "$RandomSeed" *
-    "testnew"
+    "_hete" *
+    "$heto"
 mkpath(output_folder)
 
 # model_filenames = [
