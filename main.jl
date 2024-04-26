@@ -4,13 +4,13 @@ Year = 2022
 # Read data from .jld2 file 
 params = STESTS.read_jld2("./data/ADS2032_5GWBES_BS_AggES_" * "$Year" * ".jld2")
 strategic = true
-heto = true
+heto = false
 RandomModel = false
 RandomSeed = 1
-ratio = 1.0
+ratio = 0.5
 RM = 0.03
 VOLL = 9000.0
-NDay = 364
+NDay = 2
 UCHorizon = Int(25) # optimization horizon for unit commitment model, 24 hours for WECC data, 4 hours for 3-bus test data
 EDHorizon = Int(1) # optimization horizon for economic dispatch model, 1 without look-ahead, 12 with 1-hour look-ahead
 EDSteps = Int(12) # number of 5-min intervals in a hour
@@ -48,7 +48,7 @@ output_folder =
     "$ESMC" *
     "_" *
     "$RandomSeed" *
-    "test"
+    "testnew"
 mkpath(output_folder)
 
 # model_filenames = [
