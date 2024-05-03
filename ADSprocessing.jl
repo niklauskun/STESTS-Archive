@@ -5,7 +5,7 @@ using Interpolations
 # read CSV files
 
 RealTimeNoise = true
-Year = 2030
+Year = 2022
 # CurrentMix = true
 TransmissionCap = true
 DataName = "./data/ADS2032_5GWBES_BS_AggES_" * "$Year" * ".jld2"
@@ -39,7 +39,7 @@ timereaddata = @elapsed begin
     GMustRun = gendata[!, :"MustRun"] # read generator must run status
     GNLC = gendata[!, :"NoLoadCost(\$)"] * 2 # read generator non-load cost, in $
     GMC = gendata[!, :"VOM Cost"] * 2 # read generator VOM cost, in $/MW
-    GSMC = Matrix(gendata[:, 22:26]) * 2 # read generator segment marginal cost, in $/MW
+    GSMC = Matrix(gendata[:, 26:29]) * 2 # read generator segment marginal cost, in $/MW
     GINCPmax = Matrix(gendata[:, 5:9]) # read generator segment maximum capacity, in MW
     GType = gendata[!, :"SubType"] # read generator type
     GRU = gendata[!, :"RampUp Rate(MW/minute)"] * 60 # read generator ramp up rate, in MW/hour

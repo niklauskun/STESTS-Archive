@@ -27,7 +27,15 @@ PriceCap = repeat(
 FuelAdjustment = 1.2
 ErrorAdjustment = 0.25
 LoadAdjustment = 1.0
-ESAdjustment = 1.0 # 2.7 for 2030 to 20GW
+if Year == 2022
+    ESAdjustment = 1.0
+elseif Year == 2030
+    ESAdjustment = 2.7
+elseif Year == 2040
+    ESAdjustment = 1.28
+elseif Year == 2050
+    ESAdjustment = 1.3
+end
 
 output_folder =
     "output/Strategic/" *
@@ -60,7 +68,14 @@ mkpath(output_folder)
 #     "/Region1/4hrmodel1_5Seg.jld2",
 # ]
 model_base_folder =
-    "models/BAW" * "$BAWindow" * "EDH" * "$EDHorizon" * "MC" * "$ESMC"
+    "models/" *
+    "$Year" *
+    "/BAW" *
+    "$BAWindow" *
+    "EDH" *
+    "$EDHorizon" *
+    "MC" *
+    "$ESMC"
 
 # Update strategic storage scale base on set ratio
 storagebidmodels = []
